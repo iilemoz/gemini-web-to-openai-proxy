@@ -324,10 +324,32 @@ Instructions for tool calling:
 
     let hasYieldedContent = false;
     let chat;
+    let abortListener = null;
 
     try {
+      if (signal?.aborted) {
+        const err = new Error('Aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+
+      const abortPromise = new Promise((_, reject) => {
+        abortListener = () => {
+          if (isTemporary && client) {
+            try { client.close(); } catch (_) {}
+          }
+          const err = new Error('Aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        signal?.addEventListener('abort', abortListener, { once: true });
+      });
+
       chat = client.newChat({ model: resolvedModel });
-      const stream = await chat.generateContentStream(generateOpts);
+      const stream = await Promise.race([
+        chat.generateContentStream(generateOpts),
+        abortPromise
+      ]);
 
       for await (const chunk of stream) {
         // Respect client disconnect
@@ -399,6 +421,10 @@ Instructions for tool calling:
       }
 
     } finally {
+      if (abortListener && signal) {
+        signal.removeEventListener('abort', abortListener);
+      }
+
       // Safety fallback: if the stream ended without any deltas, yield lastOutput
       if (!hasYieldedContent && chat?.lastOutput?.text) {
         const fallback = chat.lastOutput.text

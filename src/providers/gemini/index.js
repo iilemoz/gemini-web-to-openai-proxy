@@ -3,23 +3,133 @@ import { GeminiEngine } from './GeminiEngine.js';
 import { logger } from '../../utils/logger.js';
 
 /**
- * Google Gemini Provider.
- * Supports both Guest Mode (instant, no login) and Account Mode (via cookies).
- * Delegates all generation work to GeminiEngine.
+ * Google Gemini Provider Adapter.
+ * Integrates Google Gemini Web (Guest & Account Modes) into the unified provider architecture.
+ * Delegates actual HTTP streaming and token generation to GeminiEngine.
  */
 export class GeminiProvider extends BaseProvider {
   constructor() {
-    super('gemini');
+    super({
+      id: 'gemini',
+      name: 'Google Gemini Web'
+    });
     this.engine = new GeminiEngine();
   }
 
   /**
-   * Gemini is our sole primary provider and handles all models.
-   * @param {string} _modelId
+   * Validate Gemini configuration.
+   * Ensures account cookies or guest mode availability without logging sensitive tokens.
+   */
+  validateConfig() {
+    return {
+      valid: true,
+      mode: process.env.GEMINI_SECURE_1PSID ? 'account' : 'guest'
+    };
+  }
+
+  /**
+   * Health check for Gemini provider.
+   */
+  async checkHealth() {
+    return {
+      status: 'ok',
+      provider: 'gemini',
+      mode: process.env.GEMINI_SECURE_1PSID ? 'account' : 'guest'
+    };
+  }
+
+  /**
+   * Returns models natively hosted by Gemini provider.
+   */
+  getModels() {
+    return [
+      {
+        id: 'gemini-flash',
+        name: 'Gemini Flash',
+        description: 'Google Gemini 2.5 Flash / Gemini 3 Flash (Fast & Pure HTTP)',
+        aliases: ['gemini-2.5-flash'],
+        capabilities: {
+          chat: true,
+          stream: true,
+          tools: true,
+          vision: true,
+          json: true
+        }
+      },
+      {
+        id: 'gemini-pro',
+        name: 'Gemini Pro',
+        description: 'Google Gemini 2.5 Pro / Gemini 3 Pro (Complex Reasoning & Deep Knowledge)',
+        aliases: ['gemini-2.5-pro'],
+        capabilities: {
+          chat: true,
+          stream: true,
+          tools: true,
+          vision: true,
+          json: true
+        }
+      },
+      {
+        id: 'gemini-thinking',
+        name: 'Gemini Thinking',
+        description: 'Google Gemini 2.5 Thinking with deep reasoning stream',
+        aliases: ['gemini-2.5-thinking'],
+        capabilities: {
+          chat: true,
+          stream: true,
+          tools: false,
+          vision: false,
+          json: false
+        }
+      },
+      {
+        id: 'gemini-lite',
+        name: 'Gemini Lite',
+        description: 'Google Gemini Lite Model',
+        aliases: [],
+        capabilities: {
+          chat: true,
+          stream: true,
+          tools: false,
+          vision: false,
+          json: false
+        }
+      }
+    ];
+  }
+
+  /**
+   * Check whether this model is supported by Gemini.
+   * Only matches genuine Gemini models and configured aliases.
+   * @param {string} modelId
    * @returns {boolean}
    */
-  supportsModel(_modelId) {
-    return true;
+  supportsModel(modelId) {
+    if (!modelId || typeof modelId !== 'string') return false;
+    const lower = modelId.toLowerCase();
+    const models = this.getModels();
+    return models.some(
+      m => m.id.toLowerCase() === lower || (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
+    );
+  }
+
+  /**
+   * Return capabilities for a Gemini model.
+   * @param {string} modelId
+   * @returns {Object}
+   */
+  getCapabilities(modelId) {
+    const lower = String(modelId).toLowerCase();
+    const isThinking = lower.includes('think');
+    const isLite = lower.includes('lite');
+
+    return {
+      chat: true,
+      stream: true,
+      tools: !isThinking && !isLite,
+      vision: !isThinking && !isLite,
+      json: !isThinking && !isLite
+    };
   }
 
   /**
@@ -28,7 +138,7 @@ export class GeminiProvider extends BaseProvider {
    * @param {Object}      params
    * @param {string}      params.model
    * @param {Array}       params.messages
-   * @param {boolean}     params.stream
+   * @param {boolean}     [params.stream]
    * @param {string}      [params.token]
    * @param {Array}       [params.tools]
    * @param {*}           [params.tool_choice]
@@ -40,5 +150,12 @@ export class GeminiProvider extends BaseProvider {
       `[GeminiProvider] Dispatching | Model: ${model} | Tools: ${Array.isArray(tools) ? tools.length : 0}`
     );
     yield* this.engine.streamChat({ model, messages, token, tools, tool_choice, signal });
+  }
+
+  /**
+   * Normalizes Gemini errors.
+   */
+  normalizeError(err) {
+    return super.normalizeError(err);
   }
 }

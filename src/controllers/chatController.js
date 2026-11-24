@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { registry } from '../providers/index.js';
+import { registry, modelRouter } from '../providers/index.js';
 import {
   formatSSEChunk,
   formatSSEUsageChunk,
@@ -83,6 +83,32 @@ export async function handleChatCompletion(req, res) {
     });
   }
 
+  // ── Feature flags ──────────────────────────────────────────────────────────
+  const includeUsage  = stream_options?.include_usage === true;
+  const hasTools      = effectiveTools.length > 0;
+
+  // ── Resolve Provider and Validate Capabilities via ModelRouter ─────────────
+  let provider;
+  if (registry._mockDefaultProvider) {
+    provider = registry._mockDefaultProvider;
+  } else {
+    try {
+      const resolution = modelRouter.resolve(model, {
+        requiredCapability: hasTools ? 'tools' : undefined
+      });
+      provider = resolution.provider;
+    } catch (routingErr) {
+      return res.status(routingErr.status || 404).json({
+        error: {
+          message: routingErr.message,
+          type:    routingErr.type || 'invalid_request_error',
+          code:    routingErr.code || 'model_not_found',
+          param:   routingErr.param || 'model'
+        }
+      });
+    }
+  }
+
   // ── Auth: extract Gemini cookie from request (separated from proxy API auth) ────────
   const token = req.geminiCookie || null;
 
@@ -117,10 +143,6 @@ export async function handleChatCompletion(req, res) {
     }
   });
 
-  // ── Feature flags ──────────────────────────────────────────────────────────
-  const includeUsage  = stream_options?.include_usage === true;
-  const hasTools      = effectiveTools.length > 0;
-  const provider      = registry.getProviderForModel(model);
   const promptTokens  = estimatePromptTokens(messages);
 
   logger.info(

@@ -1,46 +1,98 @@
+import { ProviderRegistry } from './ProviderRegistry.js';
+import { ModelRegistry } from './ModelRegistry.js';
+import { ModelRouter } from './ModelRouter.js';
 import { GeminiProvider } from './gemini/index.js';
+import { BaseProvider, ProviderAdapter } from './BaseProvider.js';
 import { logger } from '../utils/logger.js';
 
+export { ProviderRegistry, ModelRegistry, ModelRouter, BaseProvider, ProviderAdapter };
+
+// Initialize singletons
+export const providerRegistry = new ProviderRegistry();
+export const modelRegistry = new ModelRegistry();
+export const modelRouter = new ModelRouter(providerRegistry, modelRegistry);
+
+// Register Google Gemini provider and its native models
+const geminiProvider = new GeminiProvider();
+providerRegistry.register(geminiProvider);
+
+for (const modelDef of geminiProvider.getModels()) {
+  modelRegistry.registerModel({
+    ...modelDef,
+    providerId: geminiProvider.id,
+    owned_by: 'google'
+  });
+}
+
 /**
- * Central Provider Registry.
- * Pure HTTP Google Gemini Web Provider (Guest & Account Modes).
+ * Backward-compatible registry facade.
+ * Allows existing tests and controllers to access the provider subsystem smoothly
+ * while delegating explicit routing to ModelRouter.
  */
-class ProviderRegistry {
+class LegacyRegistryFacade {
   constructor() {
-    this.providers = new Map();
-    this.defaultProvider = null;
+    this._mockDefaultProvider = null;
+  }
+
+  get providers() {
+    return providerRegistry.providers;
+  }
+
+  get defaultProvider() {
+    return this._mockDefaultProvider || providerRegistry.getProvider('gemini');
+  }
+
+  set defaultProvider(provider) {
+    const gemini = providerRegistry.getProvider('gemini');
+    if (provider === gemini) {
+      this._mockDefaultProvider = null;
+    } else {
+      this._mockDefaultProvider = provider;
+    }
   }
 
   /**
-   * Register an AI provider.
-   * @param {import('./BaseProvider.js').BaseProvider} provider
-   * @param {boolean} isDefault
+   * Register a provider and dynamically register any models it advertises.
+   * @param {BaseProvider} provider
+   * @param {boolean} [isDefault]
    */
   register(provider, isDefault = false) {
-    this.providers.set(provider.name, provider);
-    if (isDefault || !this.defaultProvider) {
-      this.defaultProvider = provider;
+    const id = provider.id || provider.name;
+    if (!providerRegistry.hasProvider(id)) {
+      providerRegistry.register(provider);
     }
-    logger.info(`Provider registered: [${provider.name}] (default: ${isDefault})`);
+
+    if (typeof provider.getModels === 'function') {
+      for (const m of provider.getModels()) {
+        if (!modelRegistry.hasModel(m.id)) {
+          modelRegistry.registerModel({
+            ...m,
+            providerId: id,
+            owned_by: m.owned_by || id
+          });
+        }
+      }
+    }
+
+    if (isDefault) {
+      this._mockDefaultProvider = provider;
+    }
   }
 
   /**
-   * Finds the best provider for the requested model.
+   * Resolves provider for the requested model.
+   * If a test has set a mock defaultProvider, that mock is prioritized.
+   * Otherwise delegates to the ModelRouter for explicit resolution.
    * @param {string} modelId
-   * @returns {import('./BaseProvider.js').BaseProvider}
+   * @returns {BaseProvider}
    */
   getProviderForModel(modelId) {
-    for (const provider of this.providers.values()) {
-      if (provider.name !== 'gemini' && typeof provider.supportsModel === 'function' && provider.supportsModel(modelId)) {
-        return provider;
-      }
+    if (this._mockDefaultProvider) {
+      return this._mockDefaultProvider;
     }
-    return this.defaultProvider;
+    const resolved = modelRouter.resolve(modelId);
+    return resolved.provider;
   }
 }
 
-export const registry = new ProviderRegistry();
-
-// Initialize Google Gemini provider as the sole, default provider
-const geminiProvider = new GeminiProvider();
-registry.register(geminiProvider, true);
+export const registry = new LegacyRegistryFacade();

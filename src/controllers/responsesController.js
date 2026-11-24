@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { registry } from '../providers/index.js';
+import { registry, modelRouter } from '../providers/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
@@ -48,7 +48,27 @@ export async function handleResponses(req, res) {
   }
 
   const token = req.geminiCookie || null;
-  const provider = registry.getProviderForModel(model);
+  
+  // ── Resolve Provider via ModelRouter ──────────────────────────────────────
+  let provider;
+  if (registry._mockDefaultProvider) {
+    provider = registry._mockDefaultProvider;
+  } else {
+    try {
+      const resolution = modelRouter.resolve(model);
+      provider = resolution.provider;
+    } catch (routingErr) {
+      return res.status(routingErr.status || 404).json({
+        error: {
+          message: routingErr.message,
+          type:    routingErr.type || 'invalid_request_error',
+          code:    routingErr.code || 'model_not_found',
+          param:   routingErr.param || 'model'
+        }
+      });
+    }
+  }
+
   const responseId = `resp-${crypto.randomUUID()}`;
 
   const abortController = new AbortController();

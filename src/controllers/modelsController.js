@@ -1,25 +1,25 @@
-import { config } from '../config/index.js';
+import { modelRegistry } from '../providers/index.js';
 
 /**
  * GET /v1/models
- * Returns all supported model definitions in OpenAI list format.
+ * Returns all registered and available models in OpenAI list format.
  */
 export function listModels(req, res) {
+  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: true });
   res.json({
     object: 'list',
-    data:   config.models
+    data: models
   });
 }
 
 /**
  * GET /v1/models/:model
- * Returns a single model definition by ID.
- * Most OpenAI SDKs call this endpoint to validate a model before sending requests.
+ * Returns a single model definition by ID or alias.
  */
 export function getModel(req, res) {
   const { model } = req.params;
 
-  const found = config.models.find(m => m.id === model);
+  const found = modelRegistry.getModel(model);
 
   if (!found) {
     return res.status(404).json({
@@ -32,5 +32,15 @@ export function getModel(req, res) {
     });
   }
 
-  res.json(found);
+  res.json({
+    id: model,
+    object: 'model',
+    created: found.created,
+    owned_by: found.owned_by,
+    permission: found.permission || [],
+    root: found.id,
+    parent: found.parent,
+    description: found.description,
+    capabilities: found.capabilities
+  });
 }
