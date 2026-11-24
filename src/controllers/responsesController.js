@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { registry } from '../providers/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
+import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 
 /**
  * POST /v1/responses
@@ -62,6 +63,27 @@ export async function handleResponses(req, res) {
       if (!chunk) continue;
       const text = typeof chunk === 'object' ? chunk.text : chunk;
       fullContent += text;
+    }
+
+    if (isUpstreamErrorText(fullContent)) {
+      logger.warn(`[Responses API] Upstream Gemini returned internal error text: "${fullContent}"`);
+      return res.status(502).json({
+        error: {
+          message: `Upstream model error: ${fullContent}`,
+          type: 'upstream_error',
+          code: 'model_error'
+        }
+      });
+    }
+
+    if (!fullContent || fullContent.trim().length === 0) {
+      return res.status(502).json({
+        error: {
+          message: 'Upstream model returned an empty response.',
+          type: 'upstream_error',
+          code: 'empty_response'
+        }
+      });
     }
 
     res.json({

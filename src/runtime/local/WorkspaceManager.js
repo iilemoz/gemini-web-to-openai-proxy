@@ -1,6 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 
 /**
  * Manages authorized local workspaces and enforces strict path traversal protection.
@@ -27,7 +27,33 @@ export class WorkspaceManager {
     if (!this.isPathAuthorized(resolved)) {
       throw new Error(`Security Exception: Access denied to path outside authorized workspace: '${targetPath}'`);
     }
-    return resolved;
+
+    // Harden against symlink traversal / junction escapes
+    try {
+      const real = realpathSync(resolved);
+      if (!this.isPathAuthorized(real)) {
+        throw new Error(`Security Exception: Symlink points outside authorized workspace: '${targetPath}' -> '${real}'`);
+      }
+      return real;
+    } catch (e) {
+      if (e.code === 'ENOENT') {
+        let parent = path.dirname(resolved);
+        while (parent && parent !== path.dirname(parent)) {
+          if (existsSync(parent)) {
+            try {
+              const realParent = realpathSync(parent);
+              if (!this.isPathAuthorized(realParent)) {
+                throw new Error(`Security Exception: Parent directory symlink points outside authorized workspace: '${targetPath}'`);
+              }
+            } catch { /* ignore non-critical realpath errors on parent */ }
+            break;
+          }
+          parent = path.dirname(parent);
+        }
+        return resolved;
+      }
+      throw e;
+    }
   }
 
   async isBinary(filePath) {

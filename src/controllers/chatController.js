@@ -9,6 +9,7 @@ import {
 import { parseDSML } from '../utils/dsmlParser.js';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
+import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -258,6 +259,17 @@ export async function handleChatCompletion(req, res) {
       }
 
       const { content, toolCalls } = parseDSML(fullContent);
+
+      if (isUpstreamErrorText(content) && (!toolCalls || toolCalls.length === 0)) {
+        logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${content}"`);
+        return res.status(502).json({
+          error: {
+            message: `Upstream model error: ${content}`,
+            type: 'upstream_error',
+            code: 'model_error'
+          }
+        });
+      }
 
       res.json(formatFullResponse(completionId, model, {
         content,
