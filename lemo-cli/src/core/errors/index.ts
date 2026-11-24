@@ -53,6 +53,27 @@ export class ModelError extends LemoError {
   }
 }
 
+/** Error related to tool registration, argument validation, or execution */
+export class ToolError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'TOOL_ERROR', details);
+  }
+}
+
+/** Error related to agent execution loop, limits, or aborts */
+export class AgentExecutionError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'AGENT_EXECUTION_ERROR', details);
+  }
+}
+
+/** Error related to approval policy rejections */
+export class PolicyViolationError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'POLICY_VIOLATION_ERROR', details);
+  }
+}
+
 /**
  * Formats an error into a clean user-facing terminal message,
  * ensuring no sensitive stack traces or raw tokens are exposed.

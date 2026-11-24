@@ -4,12 +4,13 @@
  */
 
 import type { CompletionUsage } from './response.js';
+import type { ToolCall } from './request.js';
 
 export interface DeltaMessage {
   role?: string;
   content?: string | null;
   reasoning_content?: string | null;
-  tool_calls?: unknown[];
+  tool_calls?: ToolCall[] | unknown[];
 }
 
 export interface ChatCompletionChunkChoice {
