@@ -7,7 +7,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { SecurityError, WorkspaceError } from '../../core/errors/index.js';
+import { SecurityError, WorkspaceError, ToolError } from '../../core/errors/index.js';
 
 export interface WorkspaceIdentity {
   canonicalPath: string;
@@ -135,6 +135,97 @@ export class WorkspaceManager {
         current = path.dirname(current);
       }
       return resolved;
+    }
+  }
+
+  /**
+   * Resolves target path within workspace WITHOUT dereferencing the final leaf symlink.
+   * Ensures ancestor directories resolve canonically inside the workspace.
+   */
+  public resolvePathNoFollow(targetPath: string): string {
+    if (typeof targetPath !== 'string') {
+      throw new SecurityError('Target path must be a string');
+    }
+
+    if (targetPath.includes('\0')) {
+      throw new SecurityError('Null byte detected in path');
+    }
+
+    const trimmed = targetPath.trim();
+    if (!trimmed || trimmed === '.') {
+      return this.root;
+    }
+
+    const resolved = path.isAbsolute(trimmed)
+      ? path.resolve(trimmed)
+      : path.resolve(this.root, trimmed);
+
+    if (process.platform === 'win32') {
+      if (resolved.toLowerCase() === this.root.toLowerCase()) {
+        return this.root;
+      }
+    } else {
+      if (resolved === this.root) {
+        return this.root;
+      }
+    }
+
+    if (!isPathInside(this.root, resolved)) {
+      throw new SecurityError(`Access denied: path '${targetPath}' is outside workspace root`);
+    }
+
+    // Inspect parent directory canonically
+    const parentDir = path.dirname(resolved);
+    const leaf = path.basename(resolved);
+
+    if (fs.existsSync(parentDir)) {
+      try {
+        const canonicalParent = fs.realpathSync(parentDir);
+        if (!isPathInside(this.root, canonicalParent)) {
+          throw new SecurityError(`Security Exception: Parent directory symlink points outside workspace: '${targetPath}'`);
+        }
+        const leafPath = path.join(canonicalParent, leaf);
+        if (!isPathInside(this.root, leafPath)) {
+          throw new SecurityError(`Access denied: path '${targetPath}' is outside workspace root`);
+        }
+        return leafPath;
+      } catch (err) {
+        if (err instanceof SecurityError) throw err;
+        throw new SecurityError(`Failed to resolve parent path for '${targetPath}': ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } else {
+      let current = path.dirname(parentDir);
+      while (current && current !== path.dirname(current)) {
+        if (fs.existsSync(current)) {
+          try {
+            const canonicalAncestor = fs.realpathSync(current);
+            if (!isPathInside(this.root, canonicalAncestor)) {
+              throw new SecurityError(`Security Exception: Ancestor directory symlink points outside workspace: '${targetPath}'`);
+            }
+          } catch (err) {
+            if (err instanceof SecurityError) throw err;
+            throw new SecurityError(`Failed to verify ancestor path for '${targetPath}'`);
+          }
+          break;
+        }
+        current = path.dirname(current);
+      }
+      return resolved;
+    }
+  }
+
+  /**
+   * Asserts that destinationPath is not equal to sourcePath and not inside sourcePath.
+   * Prevents directory move infinite recursion and corruption.
+   */
+  public assertNotDescendant(sourcePath: string, destinationPath: string): void {
+    const normSource = path.resolve(sourcePath);
+    const normDest = path.resolve(destinationPath);
+
+    if (isPathInside(normSource, normDest)) {
+      throw new SecurityError(
+        `Cannot move directory into itself or a subdirectory of itself: '${destinationPath}' is inside '${sourcePath}'`
+      );
     }
   }
 
@@ -456,27 +547,211 @@ export class WorkspaceManager {
   }
 
   /**
-   * Sweeps and removes stale temp files older than maxAgeMs.
+   * Sweeps and removes stale temp files older than maxAgeMs recursively.
    */
   public cleanStaleTempFiles(maxAgeMs = 3_600_000): void {
-    try {
-      const files = fs.readdirSync(this.root);
-      const now = Date.now();
-      for (const file of files) {
-        if (file.startsWith('.') && file.includes('.lemo_tmp_')) {
-          const full = path.join(this.root, file);
-          try {
-            const stat = fs.statSync(full);
-            if (now - stat.mtimeMs > maxAgeMs) {
-              fs.unlinkSync(full);
+    const sweep = (dir: string) => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const now = Date.now();
+        for (const entry of entries) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name !== '.git' && entry.name !== 'node_modules') {
+              sweep(full);
             }
-          } catch {
-            // Ignore individual file error
+          } else if (entry.isFile() && entry.name.startsWith('.') && entry.name.includes('.lemo_tmp_')) {
+            try {
+              const stat = fs.statSync(full);
+              if (now - stat.mtimeMs > maxAgeMs) {
+                fs.unlinkSync(full);
+              }
+            } catch {
+              // Ignore individual unlink error
+            }
           }
         }
+      } catch {
+        // Ignore directory read error
       }
-    } catch {
-      // Ignore directory read error
+    };
+    sweep(this.root);
+  }
+
+  /**
+   * Safely deletes a regular file, empty directory, or symlink within the workspace.
+   * Rejects non-empty directories and protected workspace root.
+   */
+  public async deleteEntry(targetPath: string): Promise<{ type: 'file' | 'directory' | 'symlink'; bytesDeleted?: number }> {
+    const canonical = this.resolvePathNoFollow(targetPath);
+
+    if (canonical === this.root) {
+      throw new SecurityError('Cannot delete workspace root directory');
     }
+
+    this.assertNotSensitive(canonical);
+
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.lstat(canonical);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'ENOENT') {
+        throw new ToolError(`Target not found: '${this.toRelative(canonical)}'`);
+      }
+      throw err;
+    }
+
+    if (stat.isSymbolicLink()) {
+      // Unlink symlink leaf only - target is untouched
+      await fs.promises.unlink(canonical);
+      return { type: 'symlink' };
+    }
+
+    if (stat.isDirectory()) {
+      const entries = await fs.promises.readdir(canonical);
+      if (entries.length > 0) {
+        throw new SecurityError(
+          `Cannot delete non-empty directory '${this.toRelative(canonical)}'. Recursive deletion is not supported.`
+        );
+      }
+      await fs.promises.rmdir(canonical);
+      return { type: 'directory' };
+    }
+
+    if (stat.isFile()) {
+      const bytesDeleted = stat.size;
+      await fs.promises.unlink(canonical);
+      return { type: 'file', bytesDeleted };
+    }
+
+    throw new SecurityError(`Unsupported file type: '${this.toRelative(canonical)}'`);
+  }
+
+  /**
+   * Safely moves or renames a regular file, empty/populated directory, or symlink within the workspace.
+   * Enforces dual boundary containment, root protection, sensitive path rejection,
+   * descendant move prevention, and race-safe non-overwrite semantics.
+   */
+  public async moveEntry(
+    sourcePath: string,
+    destinationPath: string,
+    options?: { overwrite?: boolean }
+  ): Promise<{ type: 'file' | 'directory' | 'symlink'; bytesMoved?: number }> {
+    const canonicalSource = this.resolvePathNoFollow(sourcePath);
+    if (canonicalSource === this.root) {
+      throw new SecurityError('Cannot move workspace root directory');
+    }
+    this.assertNotSensitive(canonicalSource);
+
+    let sourceStat: fs.Stats;
+    try {
+      sourceStat = await fs.promises.lstat(canonicalSource);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === 'ENOENT') {
+        throw new ToolError(`Source not found: '${this.toRelative(canonicalSource)}'`);
+      }
+      throw err;
+    }
+
+    const canonicalDest = this.resolvePathNoFollow(destinationPath);
+    if (canonicalDest === this.root) {
+      throw new SecurityError('Cannot overwrite workspace root directory');
+    }
+    this.assertNotSensitive(canonicalDest);
+
+    if (canonicalSource === canonicalDest) {
+      throw new ToolError('Source and destination paths are identical');
+    }
+
+    // Validate destination parent directory exists and resides inside workspace
+    const destParent = path.dirname(canonicalDest);
+    if (!fs.existsSync(destParent)) {
+      throw new WorkspaceError(`Destination parent directory does not exist: '${this.toRelative(destParent)}'`);
+    }
+    const canonicalDestParent = fs.realpathSync(destParent);
+    if (!isPathInside(this.root, canonicalDestParent)) {
+      throw new SecurityError('Destination parent directory symlink points outside workspace');
+    }
+
+    let destExists = false;
+    let destStat: fs.Stats | null = null;
+    try {
+      destStat = await fs.promises.lstat(canonicalDest);
+      destExists = true;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code !== 'ENOENT') {
+        throw err;
+      }
+    }
+
+    // Directory relocation
+    if (sourceStat.isDirectory()) {
+      this.assertNotDescendant(canonicalSource, canonicalDest);
+
+      if (destExists) {
+        throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Cannot overwrite with directory.`);
+      }
+
+      await fs.promises.rename(canonicalSource, canonicalDest);
+      return { type: 'directory' };
+    }
+
+    // Regular file relocation
+    if (sourceStat.isFile()) {
+      if (destExists) {
+        if (options?.overwrite !== true) {
+          throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Specify overwrite=true to replace.`);
+        }
+        if (destStat?.isDirectory()) {
+          throw new SecurityError(`Cannot overwrite directory with file: '${this.toRelative(canonicalDest)}'`);
+        }
+        if (destStat?.isSymbolicLink()) {
+          throw new SecurityError(`Refusing to overwrite symlink destination: '${this.toRelative(canonicalDest)}'`);
+        }
+        // Overwrite via atomic rename
+        await fs.promises.rename(canonicalSource, canonicalDest);
+        return { type: 'file', bytesMoved: sourceStat.size };
+      } else {
+        // Destination does not exist.
+        // For non-overwrite, guarantee race safety via atomic hard link where supported
+        if (options?.overwrite !== true) {
+          try {
+            await fs.promises.link(canonicalSource, canonicalDest);
+            await fs.promises.unlink(canonicalSource);
+            return { type: 'file', bytesMoved: sourceStat.size };
+          } catch (linkErr: unknown) {
+            const code = (linkErr as { code?: string })?.code;
+            if (code === 'EEXIST') {
+              throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Specify overwrite=true to replace.`);
+            }
+            if (code === 'EXDEV') {
+              throw new SecurityError('Cross-device file move not permitted');
+            }
+            // If hardlinks not supported on filesystem (e.g. FAT), fallback to rename
+            await fs.promises.rename(canonicalSource, canonicalDest);
+            return { type: 'file', bytesMoved: sourceStat.size };
+          }
+        } else {
+          await fs.promises.rename(canonicalSource, canonicalDest);
+          return { type: 'file', bytesMoved: sourceStat.size };
+        }
+      }
+    }
+
+    // Symlink relocation
+    if (sourceStat.isSymbolicLink()) {
+      if (destExists) {
+        if (options?.overwrite !== true) {
+          throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Specify overwrite=true to replace.`);
+        }
+      }
+      await fs.promises.rename(canonicalSource, canonicalDest);
+      return { type: 'symlink' };
+    }
+
+    throw new SecurityError(`Unsupported file type: '${this.toRelative(canonicalSource)}'`);
   }
 }

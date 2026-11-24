@@ -17,7 +17,9 @@ import {
   SearchFilesTool,
   FileInfoTool,
   WriteFileTool,
-  EditFileTool
+  EditFileTool,
+  DeleteFileTool,
+  MoveFileTool
 } from '../tools/builtin/index.js';
 import { WorkspaceManager } from '../workspace/WorkspaceManager.js';
 import type { ApprovalPolicy } from '../policies/ApprovalPolicy.js';
@@ -79,6 +81,12 @@ export class AgentSession {
     }
     if (!this.agent.registry.has('edit_file')) {
       this.agent.registerTool(new EditFileTool(this.workspaceManager, this.agent.approvalManager));
+    }
+    if (!this.agent.registry.has('delete_file')) {
+      this.agent.registerTool(new DeleteFileTool(this.workspaceManager, this.agent.approvalManager));
+    }
+    if (!this.agent.registry.has('move_file')) {
+      this.agent.registerTool(new MoveFileTool(this.workspaceManager, this.agent.approvalManager));
     }
   }
 

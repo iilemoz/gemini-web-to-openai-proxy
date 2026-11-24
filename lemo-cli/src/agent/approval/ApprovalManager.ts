@@ -41,6 +41,7 @@ export interface ExpectedValidation {
   operationType: 'create' | 'modify' | 'delete' | 'move' | 'execute';
   workspaceIdentity: WorkspaceIdentity;
   canonicalPath: string;
+  destinationCanonicalPath?: string | undefined;
   originalContentHash?: string | undefined;
   proposedContentHash?: string | undefined;
 }
@@ -215,6 +216,17 @@ export class ApprovalManager {
       throw new SecurityError(
         `Execution denied: target path '${expected.canonicalPath}' not found in approved target paths`
       );
+    }
+
+    if (expected.destinationCanonicalPath) {
+      const destMatched = stored.record.targetPaths.some(
+        (p) => p.canonicalPath === expected.destinationCanonicalPath
+      );
+      if (!destMatched) {
+        throw new SecurityError(
+          `Execution denied: destination path '${expected.destinationCanonicalPath}' not found in approved target paths`
+        );
+      }
     }
 
     // 9. Original content fingerprint validation (for modify operations)

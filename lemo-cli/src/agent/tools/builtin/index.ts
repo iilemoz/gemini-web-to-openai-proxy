@@ -6,3 +6,5 @@ export { FileInfoTool } from './FileInfoTool.js';
 export { SafeRegexMatcher } from './SafeRegexMatcher.js';
 export { WriteFileTool, WriteFileSchema } from './WriteFileTool.js';
 export { EditFileTool, EditFileSchema } from './EditFileTool.js';
+export { DeleteFileTool, DeleteFileSchema } from './DeleteFileTool.js';
+export { MoveFileTool, MoveFileSchema } from './MoveFileTool.js';
