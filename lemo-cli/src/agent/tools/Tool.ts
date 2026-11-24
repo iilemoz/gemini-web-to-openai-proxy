@@ -18,11 +18,33 @@ export interface ToolSchema {
   [key: string]: unknown;
 }
 
+export interface ApprovalPreparation {
+  operationType: 'create' | 'modify' | 'delete' | 'move' | 'execute';
+  targetPaths: { canonicalPath: string; workspaceRelative: string }[];
+  payloadDigest: {
+    algorithm: 'sha256';
+    originalContentHash?: string | undefined;
+    proposedContentHash?: string | undefined;
+    commandStringHash?: string | undefined;
+  };
+  preview?: string | undefined;
+  metadata?: Record<string, unknown> | undefined;
+}
+
 export abstract class Tool {
   public abstract readonly name: string;
   public abstract readonly description: string;
   public abstract readonly parameters: ToolSchema;
   public abstract readonly permissions: ToolPermission[];
+
+  /**
+   * Optionally prepares detailed approval information (e.g. diffs, fingerprints)
+   * before the approval policy is evaluated.
+   */
+  public prepareApproval?(
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext
+  ): Promise<ApprovalPreparation | null>;
 
   /**
    * Validates tool invocation arguments against parameter schema.

@@ -6,7 +6,14 @@
 
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { SecurityError, WorkspaceError } from '../../core/errors/index.js';
+
+export interface WorkspaceIdentity {
+  canonicalPath: string;
+  deviceNumber: number;
+  inodeNumber: number;
+}
 
 /**
  * Checks whether childPath is equal to or located inside parentPath.
@@ -241,5 +248,235 @@ export class WorkspaceManager {
     const rel = path.relative(this.root, targetPath);
     if (!rel || rel === '') return '.';
     return rel.replace(/\\/g, '/');
+  }
+
+  /**
+   * Returns cryptographic identity of the canonical workspace root.
+   */
+  public getIdentity(): WorkspaceIdentity {
+    const stat = fs.statSync(this.root);
+    return {
+      canonicalPath: this.root,
+      deviceNumber: Number(stat.dev),
+      inodeNumber: Number(stat.ino)
+    };
+  }
+
+  /**
+   * Revalidates workspace directory identity against expected identity.
+   */
+  public verifyIdentity(expected: WorkspaceIdentity): boolean {
+    try {
+      const canonical = fs.realpathSync(this.root);
+      if (canonical !== expected.canonicalPath) return false;
+      const stat = fs.statSync(canonical);
+      return Number(stat.dev) === expected.deviceNumber && Number(stat.ino) === expected.inodeNumber;
+    } catch {
+      return false;
+    }
+  }
+
+  private static readonly activeGlobalTempFiles = new Set<string>();
+  private static exitHookRegistered = false;
+
+  private static registerExitHook(): void {
+    if (WorkspaceManager.exitHookRegistered) return;
+    WorkspaceManager.exitHookRegistered = true;
+
+    const cleanup = () => {
+      for (const tempPath of WorkspaceManager.activeGlobalTempFiles) {
+        try {
+          if (fs.existsSync(tempPath)) {
+            fs.unlinkSync(tempPath);
+          }
+        } catch {
+          // Best effort cleanup during process exit
+        }
+      }
+      WorkspaceManager.activeGlobalTempFiles.clear();
+    };
+
+    process.on('exit', cleanup);
+    process.on('SIGINT', () => {
+      cleanup();
+      process.exit(130);
+    });
+    process.on('SIGTERM', () => {
+      cleanup();
+      process.exit(143);
+    });
+  }
+
+  /**
+   * Atomically writes content to a target file inside the workspace.
+   * Guarantees:
+   * 1. Target and parent directory validation inside canonical workspace.
+   * 2. Exclusive temporary sibling file creation with mode 0o600.
+   * 3. Full sync of temporary file descriptor before closing.
+   * 4. Pre-commit parent and target identity verification.
+   * 5. Atomic rename replacement.
+   * 6. Cleanup of temporary files on all failure paths.
+   */
+  public async writeAtomic(targetPath: string, content: string | Buffer): Promise<{ bytesWritten: number }> {
+    const canonicalTarget = this.resolvePath(targetPath);
+
+    if (canonicalTarget === this.root) {
+      throw new SecurityError('Cannot overwrite workspace root directory');
+    }
+
+    this.assertNotSensitive(canonicalTarget);
+
+    const parentDir = path.dirname(canonicalTarget);
+    if (!fs.existsSync(parentDir)) {
+      throw new WorkspaceError(`Parent directory does not exist: '${this.toRelative(parentDir)}'`);
+    }
+
+    const canonicalParent = fs.realpathSync(parentDir);
+    if (!isPathInside(this.root, canonicalParent)) {
+      throw new SecurityError('Parent directory symlink points outside workspace');
+    }
+
+    const parentStat = fs.statSync(canonicalParent);
+    if (!parentStat.isDirectory()) {
+      throw new WorkspaceError(`Parent path is not a directory: '${this.toRelative(parentDir)}'`);
+    }
+
+    const targetExists = fs.existsSync(canonicalTarget);
+    if (targetExists) {
+      const lstat = fs.lstatSync(canonicalTarget);
+      if (lstat.isSymbolicLink()) {
+        throw new SecurityError(`Refusing to write through symlink destination: '${this.toRelative(canonicalTarget)}'`);
+      }
+      if (lstat.isDirectory()) {
+        throw new SecurityError(`Cannot overwrite directory with file: '${this.toRelative(canonicalTarget)}'`);
+      }
+      if (!lstat.isFile()) {
+        throw new SecurityError(`Target is not a regular file: '${this.toRelative(canonicalTarget)}'`);
+      }
+    }
+
+    // Generate exclusive sibling temp file
+    const base = path.basename(canonicalTarget);
+    const uuid = crypto.randomUUID();
+    const tempPath = path.join(canonicalParent, `.${base}.lemo_tmp_${uuid}`);
+
+    WorkspaceManager.registerExitHook();
+    WorkspaceManager.activeGlobalTempFiles.add(tempPath);
+
+    let handle: fs.promises.FileHandle | null = null;
+
+    try {
+      // Exclusive creation mode 0o600 (owner read/write only)
+      handle = await fs.promises.open(tempPath, 'wx', 0o600);
+      const buf = typeof content === 'string' ? Buffer.from(content, 'utf8') : content;
+      await handle.writeFile(buf);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+
+      // Revalidate parent directory identity
+      const currentParentStat = await fs.promises.stat(canonicalParent);
+      if (
+        Number(currentParentStat.dev) !== Number(parentStat.dev) ||
+        Number(currentParentStat.ino) !== Number(parentStat.ino)
+      ) {
+        throw new SecurityError('Parent directory identity changed during atomic write operation');
+      }
+
+      // Revalidate target if it existed
+      if (targetExists) {
+        const currentTargetLstat = await fs.promises.lstat(canonicalTarget);
+        if (currentTargetLstat.isSymbolicLink()) {
+          throw new SecurityError('Target file was replaced with a symlink during write operation');
+        }
+      }
+
+      // Atomic replacement
+      let renamed = false;
+      let renameErr: unknown;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await fs.promises.rename(tempPath, canonicalTarget);
+          renamed = true;
+          break;
+        } catch (err: unknown) {
+          renameErr = err;
+          const code = (err as { code?: string })?.code;
+          if (process.platform === 'win32' && (code === 'EBUSY' || code === 'EPERM')) {
+            await new Promise((r) => setTimeout(r, 50 * (attempt + 1)));
+          } else {
+            break;
+          }
+        }
+      }
+
+      if (!renamed) {
+        throw renameErr;
+      }
+
+      // Sync parent directory where supported on POSIX
+      if (process.platform !== 'win32') {
+        let parentHandle: fs.promises.FileHandle | null = null;
+        try {
+          parentHandle = await fs.promises.open(canonicalParent, 'r');
+          await parentHandle.sync();
+        } catch {
+          // Ignore parent sync error on filesystems that don't support directory fsync
+        } finally {
+          if (parentHandle) {
+            try {
+              await parentHandle.close();
+            } catch {
+              // Ignore close error
+            }
+          }
+        }
+      }
+
+      WorkspaceManager.activeGlobalTempFiles.delete(tempPath);
+      return { bytesWritten: buf.length };
+    } catch (err) {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // Ignore close error
+        }
+      }
+      try {
+        if (fs.existsSync(tempPath)) {
+          await fs.promises.unlink(tempPath);
+        }
+      } catch {
+        // Ignore unlink error
+      }
+      WorkspaceManager.activeGlobalTempFiles.delete(tempPath);
+      throw err;
+    }
+  }
+
+  /**
+   * Sweeps and removes stale temp files older than maxAgeMs.
+   */
+  public cleanStaleTempFiles(maxAgeMs = 3_600_000): void {
+    try {
+      const files = fs.readdirSync(this.root);
+      const now = Date.now();
+      for (const file of files) {
+        if (file.startsWith('.') && file.includes('.lemo_tmp_')) {
+          const full = path.join(this.root, file);
+          try {
+            const stat = fs.statSync(full);
+            if (now - stat.mtimeMs > maxAgeMs) {
+              fs.unlinkSync(full);
+            }
+          } catch {
+            // Ignore individual file error
+          }
+        }
+      }
+    } catch {
+      // Ignore directory read error
+    }
   }
 }

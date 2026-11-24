@@ -36,11 +36,15 @@ export interface ToolExecutionContext {
   signal?: AbortSignal | undefined;
   workspace?: string | undefined;
   onEvent?: ((type: AgentEventType, payload: Record<string, unknown>) => void) | undefined;
+  approvalToken?: string | undefined;
+  approvalId?: string | undefined;
 }
 
 export interface ApprovalDecision {
   approved: boolean;
   reason?: string | undefined;
+  approvalToken?: string | undefined;
+  approvalId?: string | undefined;
 }
 
 export type AgentEventType =

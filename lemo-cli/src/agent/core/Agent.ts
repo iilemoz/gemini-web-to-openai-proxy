@@ -11,6 +11,8 @@ import type { Tool } from '../tools/Tool.js';
 import { ToolExecutor } from '../tools/ToolExecutor.js';
 import { StrictApprovalPolicy, type ApprovalPolicy } from '../policies/ApprovalPolicy.js';
 import { ExecutionPolicy } from '../policies/ExecutionPolicy.js';
+import { ApprovalManager } from '../approval/ApprovalManager.js';
+import { WorkspaceManager } from '../workspace/WorkspaceManager.js';
 import { AgentLoop } from './AgentLoop.js';
 import { AgentContext, type AgentContextOptions } from './AgentContext.js';
 import { AgentState } from './AgentState.js';
@@ -30,6 +32,8 @@ export interface AgentOptions {
   registry?: ToolRegistry | undefined;
   approvalPolicy?: ApprovalPolicy | undefined;
   executionPolicy?: ExecutionPolicy | undefined;
+  approvalManager?: ApprovalManager | undefined;
+  workspaceManager?: WorkspaceManager | undefined;
   defaultModel?: string | undefined;
 }
 
@@ -37,6 +41,8 @@ export class Agent {
   public readonly registry: ToolRegistry;
   public readonly approvalPolicy: ApprovalPolicy;
   public readonly executionPolicy: ExecutionPolicy;
+  public readonly approvalManager: ApprovalManager;
+  public readonly workspaceManager: WorkspaceManager;
 
   private readonly client: LemoApiClient;
   private readonly config: LemoConfig;
@@ -53,8 +59,17 @@ export class Agent {
       maxIterations: this.config.agentIterationLimit || 25,
       toolTimeoutMs: this.config.timeoutMs || 60000
     });
+    this.approvalManager = options.approvalManager || new ApprovalManager();
+    const wsRoot = options.workspaceManager?.getRoot() || this.config.defaultWorkspace || process.cwd();
+    this.workspaceManager = options.workspaceManager || new WorkspaceManager(wsRoot);
 
-    const executor = new ToolExecutor(this.registry, this.approvalPolicy, this.executionPolicy);
+    const executor = new ToolExecutor(
+      this.registry,
+      this.approvalPolicy,
+      this.executionPolicy,
+      this.approvalManager,
+      this.workspaceManager
+    );
     this.loop = new AgentLoop(this.client, this.registry, executor, this.executionPolicy);
     this.defaultModel = options.defaultModel || this.config.defaultModel || 'gemini-flash';
   }

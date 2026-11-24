@@ -86,7 +86,7 @@ export class AgentRepl {
         }
 
         // 'always' mode or 'action' with mutating/privileged permissions requires interactive user prompt
-        return this.promptApproval(tool, args);
+        return this.promptApproval(tool, args, context);
       }
     );
   }
@@ -94,19 +94,48 @@ export class AgentRepl {
   /**
    * Interactively prompts user in terminal for tool execution approval.
    */
-  private async promptApproval(tool: Tool, args: Record<string, unknown>): Promise<ApprovalDecision> {
+  private async promptApproval(
+    tool: Tool,
+    args: Record<string, unknown>,
+    context?: ToolExecutionContext
+  ): Promise<ApprovalDecision> {
     const isTTY = Boolean((this.input as { isTTY?: boolean }).isTTY);
 
     const perms = tool.permissions && tool.permissions.length > 0
       ? tool.permissions.join(', ')
       : 'none (safe)';
 
-    const argsJson = Object.keys(args).length > 0
-      ? JSON.stringify(args, null, 2)
+    let previewSection: string;
+    try {
+      if (typeof tool.prepareApproval === 'function') {
+        const prep = await tool.prepareApproval(args, context);
+        if (prep?.preview) {
+          previewSection = `  ${pc.bold('Proposed Changes / Diff:')}\n` +
+            prep.preview
+              .split('\n')
+              .map((line) => `    ${line}`)
+              .join('\n');
+        } else {
+          previewSection = `  ${pc.bold('Arguments:')}\n` +
+            JSON.stringify(args, null, 2)
+              .split('\n')
+              .map((line) => `    ${pc.gray(line)}`)
+              .join('\n');
+        }
+      } else {
+        previewSection = `  ${pc.bold('Arguments:')}\n` +
+          JSON.stringify(args, null, 2)
+            .split('\n')
+            .map((line) => `    ${pc.gray(line)}`)
+            .join('\n');
+      }
+    } catch {
+      previewSection = `  ${pc.bold('Arguments:')}\n` +
+        JSON.stringify(args, null, 2)
           .split('\n')
           .map((line) => `    ${pc.gray(line)}`)
-          .join('\n')
-      : pc.gray('    {}');
+          .join('\n');
+    }
 
     const promptCard = [
       '',
@@ -115,8 +144,7 @@ export class AgentRepl {
       pc.yellow('╰────────────────────────────────────────────────────────╯'),
       `  ${pc.bold('Tool:')}        ${pc.cyan(tool.name)}`,
       `  ${pc.bold('Permissions:')} ${pc.yellow(perms)}`,
-      `  ${pc.bold('Arguments:')}`,
-      argsJson,
+      previewSection,
       ''
     ].join('\n');
 

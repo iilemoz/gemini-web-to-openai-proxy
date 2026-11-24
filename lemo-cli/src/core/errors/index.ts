@@ -74,6 +74,13 @@ export class PolicyViolationError extends LemoError {
   }
 }
 
+/** Error related to concurrent edit conflicts */
+export class EditConflictError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'EDIT_CONFLICT_ERROR', details);
+  }
+}
+
 /** Security exception such as path traversal, symlink escape, or sensitive file access */
 export class SecurityError extends LemoError {
   constructor(message: string, details?: unknown) {

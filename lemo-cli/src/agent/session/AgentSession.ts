@@ -15,7 +15,9 @@ import {
   ListFilesTool,
   ReadFileTool,
   SearchFilesTool,
-  FileInfoTool
+  FileInfoTool,
+  WriteFileTool,
+  EditFileTool
 } from '../tools/builtin/index.js';
 import { WorkspaceManager } from '../workspace/WorkspaceManager.js';
 import type { ApprovalPolicy } from '../policies/ApprovalPolicy.js';
@@ -43,17 +45,18 @@ export class AgentSession {
 
   constructor(options: AgentSessionOptions) {
     this.config = options.config;
-    this.agent = options.agent || new Agent({
-      config: options.config,
-      client: options.client,
-      approvalPolicy: options.approvalPolicy
-    });
-    this.client = (this.agent as unknown as { client: LemoApiClient }).client || options.client!;
-    this.activeModel = options.modelOverride?.trim() || options.config.defaultModel || 'gemini-flash';
-
     const rawWorkspace = options.workspace || options.config.defaultWorkspace || process.cwd();
     this.workspaceManager = new WorkspaceManager(rawWorkspace);
     this.workspace = this.workspaceManager.getRoot();
+
+    this.agent = options.agent || new Agent({
+      config: options.config,
+      client: options.client,
+      approvalPolicy: options.approvalPolicy,
+      workspaceManager: this.workspaceManager
+    });
+    this.client = (this.agent as unknown as { client: LemoApiClient }).client || options.client!;
+    this.activeModel = options.modelOverride?.trim() || options.config.defaultModel || 'gemini-flash';
 
     // Register built-in tools if not already present
     if (!this.agent.registry.has('test_echo')) {
@@ -70,6 +73,12 @@ export class AgentSession {
     }
     if (!this.agent.registry.has('file_info')) {
       this.agent.registerTool(new FileInfoTool(this.workspaceManager));
+    }
+    if (!this.agent.registry.has('write_file')) {
+      this.agent.registerTool(new WriteFileTool(this.workspaceManager, this.agent.approvalManager));
+    }
+    if (!this.agent.registry.has('edit_file')) {
+      this.agent.registerTool(new EditFileTool(this.workspaceManager, this.agent.approvalManager));
     }
   }
 
