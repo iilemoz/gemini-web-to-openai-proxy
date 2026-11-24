@@ -1,0 +1,29 @@
+{
+  "name": "gemini-web-to-openai-proxy",
+  "version": "1.0.0",
+  "description": "High-performance, pure HTTP OpenAI-compatible API reverse proxy for Google Gemini Web (Guest & Account Mode). Created by Lemo.",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "gemini",
+    "google-gemini",
+    "openai",
+    "proxy",
+    "reverse-proxy",
+    "openai-compatible",
+    "guest-mode",
+    "lemo"
+  ],
+  "author": "Lemo",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "gemini-web-sdk": "^2.3.0"
+  }
+}

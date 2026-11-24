@@ -1,0 +1,298 @@
+import crypto from 'node:crypto';
+import { registry } from '../providers/index.js';
+import {
+  formatSSEChunk,
+  formatSSEUsageChunk,
+  formatSSEDone,
+  formatFullResponse
+} from '../utils/sse.js';
+import { parseDSML } from '../utils/dsmlParser.js';
+import { logger } from '../utils/logger.js';
+import { config } from '../config/index.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Rough token estimate: 1 token ≈ 4 characters. */
+function estimateTokens(text = '') {
+  return Math.ceil((text || '').length / 4) || 1;
+}
+
+/**
+ * Estimates prompt tokens from an OpenAI-format messages array.
+ * @param {Array} messages
+ * @returns {number}
+ */
+function estimatePromptTokens(messages) {
+  return messages.reduce((total, m) => {
+    const content = typeof m.content === 'string'
+      ? m.content
+      : JSON.stringify(m.content || '');
+    return total + estimateTokens(content);
+  }, 0) || 10;
+}
+
+// ---------------------------------------------------------------------------
+// Controller
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /v1/chat/completions
+ * OpenAI-compatible chat completion endpoint.
+ *
+ * Key behaviours:
+ *  - Streams via SSE when `stream: true`; returns a single JSON object otherwise.
+ *  - Tracks client disconnect via AbortController; stops pulling from Gemini immediately.
+ *  - Guest-mode Gemini clients are closed by GeminiEngine after each request.
+ *  - Emits a trailing usage chunk when `stream_options.include_usage` is true.
+ *  - Strips DSML / <tool_call> blocks and re-emits them as standard tool_calls.
+ */
+export async function handleChatCompletion(req, res) {
+  const {
+    model          = config.defaultModel,
+    messages       = [],
+    stream         = false,
+    tools          = [],
+    tool_choice,
+    stream_options = {}
+  } = req.body;
+
+  // ── Basic validation ───────────────────────────────────────────────────────
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({
+      error: {
+        message: 'Invalid request: "messages" array is required and must not be empty.',
+        type:    'invalid_request_error',
+        code:    'missing_messages'
+      }
+    });
+  }
+
+  // ── Auth: extract bearer token from client (may be a Google cookie) ────────
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+  // ── Abort controller for client disconnect handling ────────────────────────
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
+  // Listen on `res` (not `req`) for disconnect detection.
+  // `req.on('close')` fires when the *request body* is consumed (too early).
+  // `res.on('close')` fires only when the underlying socket is actually closed
+  // by the client (e.g. user clicks "Stop Generation" in the UI).
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      logger.info('[ChatController] Client disconnected – aborting upstream stream.');
+      abortController.abort();
+    }
+  });
+
+  // ── Feature flags ──────────────────────────────────────────────────────────
+  const includeUsage  = stream_options?.include_usage === true;
+  const hasTools      = Array.isArray(tools) && tools.length > 0;
+
+  const completionId  = `chatcmpl-${crypto.randomUUID()}`;
+  const provider      = registry.getProviderForModel(model);
+  const promptTokens  = estimatePromptTokens(messages);
+
+  logger.info(
+    `Incoming completion | Model: ${model} | Stream: ${stream} | ` +
+    `Tools: ${hasTools ? tools.length : 0} | Usage: ${includeUsage} | Provider: ${provider.name}`
+  );
+
+  try {
+    const generator = provider.chatComplete({
+      model,
+      messages,
+      stream,
+      token,
+      tools,
+      tool_choice,
+      signal
+    });
+
+    // ── STREAMING RESPONSE ─────────────────────────────────────────────────
+    if (stream) {
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      // Initial role delta (required by OpenAI spec)
+      res.write(formatSSEChunk(completionId, model, { role: 'assistant' }));
+
+      // Regex that detects the beginning of a tool-call block
+      const toolTagRegex = /(?:[<＜]\s*[|｜]\s*(?:[|｜]\s*)?DSML\s*[|｜]\s*(?:[|｜]\s*)?calls|<tool_call>)/i;
+
+      let chunkCount        = 0;
+      let completionChars   = 0;  // accumulated for usage tracking
+      let inDsmlMode        = false;
+      let dsmlBuffer        = '';
+      let pendingContent    = '';
+
+      for await (const rawChunk of generator) {
+        // Generator has already stopped if signal was aborted
+        if (!rawChunk) continue;
+
+        const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
+        const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
+
+        if (!chunkText) continue;
+
+        // ── Thinking / reasoning tokens ─────────────────────────────────────
+        if (chunkType === 'thinking') {
+          completionChars += chunkText.length;
+          res.write(formatSSEChunk(completionId, model, { reasoning_content: chunkText }));
+          chunkCount++;
+          continue;
+        }
+
+        completionChars += chunkText.length;
+
+        // ── No tools → pass through directly (fastest path) ─────────────────
+        if (!hasTools) {
+          res.write(formatSSEChunk(completionId, model, { content: chunkText }));
+          chunkCount++;
+          continue;
+        }
+
+        // ── Tool-aware buffering: watch for <tool_call> / DSML blocks ────────
+        if (inDsmlMode) {
+          dsmlBuffer += chunkText;
+        } else {
+          pendingContent += chunkText;
+
+          const match = pendingContent.match(toolTagRegex);
+          if (match) {
+            // Switch into DSML capture mode
+            inDsmlMode = true;
+            const beforeText = pendingContent.slice(0, match.index);
+            if (beforeText) {
+              res.write(formatSSEChunk(completionId, model, { content: beforeText }));
+              chunkCount++;
+            }
+            dsmlBuffer    = pendingContent.slice(match.index);
+            pendingContent = '';
+          } else {
+            // Buffer the tail if it might be the start of '<tool_call' or '< | DSML'
+            const lastLt = pendingContent.search(/[<＜][^<＜]*$/);
+            if (lastLt !== -1 && pendingContent.length - lastLt < 20) {
+              const safeText = pendingContent.slice(0, lastLt);
+              if (safeText) {
+                res.write(formatSSEChunk(completionId, model, { content: safeText }));
+                chunkCount++;
+              }
+              pendingContent = pendingContent.slice(lastLt);
+            } else {
+              res.write(formatSSEChunk(completionId, model, { content: pendingContent }));
+              chunkCount++;
+              pendingContent = '';
+            }
+          }
+        }
+      }
+
+      // ── Flush any remaining plain-text buffer ──────────────────────────────
+      if (pendingContent) {
+        res.write(formatSSEChunk(completionId, model, { content: pendingContent }));
+      }
+
+      // ── Emit parsed tool calls (or stop) ──────────────────────────────────
+      if (dsmlBuffer) {
+        const { content: afterContent, toolCalls } = parseDSML(dsmlBuffer);
+
+        if (afterContent) {
+          res.write(formatSSEChunk(completionId, model, { content: afterContent }));
+        }
+
+        if (toolCalls && toolCalls.length > 0) {
+          logger.info(`Emitting ${toolCalls.length} parsed tool call(s) to client`);
+          const streamingToolCalls = toolCalls.map((tc, idx) => ({
+            index:    idx,
+            id:       tc.id,
+            type:     tc.type || 'function',
+            function: tc.function
+          }));
+          res.write(formatSSEChunk(completionId, model, { tool_calls: streamingToolCalls }));
+          res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
+        } else {
+          if (!afterContent) {
+            res.write(formatSSEChunk(completionId, model, { content: dsmlBuffer }));
+          }
+          res.write(formatSSEChunk(completionId, model, {}, 'stop'));
+        }
+      } else {
+        res.write(formatSSEChunk(completionId, model, {}, 'stop'));
+      }
+
+      // ── Optional trailing usage chunk ──────────────────────────────────────
+      if (includeUsage) {
+        const completionTokens = estimateTokens(' '.repeat(completionChars));
+        res.write(formatSSEUsageChunk(completionId, model, {
+          promptTokens,
+          completionTokens
+        }));
+      }
+
+      res.write(formatSSEDone());
+      res.end();
+
+      logger.success(`Stream completed: ${chunkCount} chunks sent.`);
+
+    // ── NON-STREAMING RESPONSE ───────────────────────────────────────────────
+    } else {
+      let fullContent   = '';
+      let fullReasoning = '';
+
+      for await (const rawChunk of generator) {
+        if (!rawChunk) continue;
+        const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
+        const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
+
+        if (chunkType === 'thinking') {
+          fullReasoning += chunkText;
+        } else {
+          fullContent += chunkText;
+        }
+      }
+
+      const { content, toolCalls } = parseDSML(fullContent);
+
+      res.json(formatFullResponse(completionId, model, {
+        content,
+        reasoning_content: fullReasoning || null,
+        tool_calls:        toolCalls
+      }));
+
+      logger.success(
+        `Non-stream completed: ${content.length} content chars, ` +
+        `${fullReasoning.length} reasoning chars, ${toolCalls.length} tool calls.`
+      );
+    }
+
+  } catch (err) {
+    // Ignore abort errors (expected when client disconnects)
+    if (signal.aborted || err.name === 'AbortError') {
+      logger.info('[ChatController] Request was aborted cleanly.');
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
+    logger.error('Error handling chat completion:', err);
+
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: {
+          message: err.message || 'Internal server error while processing completion',
+          type:    'api_error',
+          code:    'internal_error'
+        }
+      });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
+      res.end();
+    }
+  }
+}
