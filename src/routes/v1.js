@@ -22,6 +22,21 @@ v1Router.post('/responses', handleResponses);
 v1Router.get('/models', listModels);
 v1Router.get('/models/:model', getModel);
 
+// ── MCP Protocol Endpoints ──────────────────────────────────────────────────
+v1Router.post('/mcp', async (req, res) => {
+  const { mcpServer } = await import('../integrations/mcp/index.js');
+  const response = await mcpServer.handleMessage(req.body);
+  if (!response) {
+    return res.status(204).end();
+  }
+  res.json(response);
+});
+
+v1Router.get('/mcp/servers', async (req, res) => {
+  const { mcpServerManager } = await import('../integrations/mcp/index.js');
+  res.json({ object: 'list', data: mcpServerManager.listClients() });
+});
+
 // ── Tools ────────────────────────────────────────────────────────────────────
 v1Router.get('/tools', async (req, res) => {
   const { toolRegistry } = await import('../tools/index.js');
