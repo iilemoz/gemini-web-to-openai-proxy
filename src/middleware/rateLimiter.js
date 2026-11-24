@@ -29,7 +29,7 @@ export function rateLimiter(req, res, next) {
     return res.status(429).json({
       error: {
         message: 'Rate limit exceeded. Please slow down your requests.',
-        type: 'requests',
+        type: 'rate_limit_error',
         param: null,
         code: 'rate_limit_exceeded'
       }

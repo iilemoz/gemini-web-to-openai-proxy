@@ -1,273 +1,341 @@
-# Gemini Web to OpenAI API Proxy 🚀
+# Universal AI Agent Infrastructure 🚀
+### Gemini Web to OpenAI-Compatible Multi-Runtime Agent Platform
 
 [![Node.js Version](https://img.shields.io/badge/Node.js-%3E%3D18.0.0-339933?style=flat&logo=node.js)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-412991?logo=openai)](https://platform.openai.com/docs/api-reference)
+[![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://modelcontextprotocol.io/)
+[![DeepSeek Harness](https://img.shields.io/badge/DeepSeek--Harness-Compatible-success)](https://github.com/DeepSeek-ai/deepseek-harness)
+[![Tests Passing](https://img.shields.io/badge/Tests-54%2F54%20Passing-brightgreen.svg)](tests/)
 [![Author](https://img.shields.io/badge/Author-Lemo-orange.svg)](#author--credits)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/)
 
-> **Created by Lemo**  
-> A high-performance, lightweight, pure HTTP OpenAI-compatible reverse proxy that bridges **Google Gemini Web** to standard OpenAI API endpoints (`/v1/chat/completions` and `/v1/models`).
-
----
-
-## 🌟 Key Features
-
-- **⚡ 100% Pure HTTP (No Headless Browser)**: Operates entirely via direct, high-speed HTTP network requests without Puppeteer, Playwright, or Selenium. No heavy browser overhead, no display server dependencies, and no CAPTCHA interruptions.
-- **👥 Dual Operational Modes**:
-  - **Guest Mode (Default)**: Ready out-of-the-box! Requires zero credentials or cookies. Perfect for instant usage and testing.
-  - **Account Mode**: Pass your Google Gemini cookie (`__Secure-1PSID`) via `.env` or Bearer token to unlock your account's quotas, custom settings, and advanced models.
-- **🌊 Complete Streaming (SSE) & Non-Streaming**: Seamlessly works with all standard OpenAI clients, official Python/Node SDKs, LangChain, LlamaIndex, Continue, and coding extensions.
-- **🧠 Deep Reasoning Support**: Real-time reasoning stream (`reasoning_content`) support with `gemini-thinking` and `gemini-2.5-thinking`.
-- **🛠️ Autonomous Function Calling (Tools)**: Full support for OpenAI function definitions (`tools` & `tool_choice`), automatically executed and parsed into OpenAI-standard `tool_calls` responses.
-- **🧹 Artifact Cleaning**: Intelligently strips out web TTS audio widgets, internal Google metadata, and media tokens for clean, pristine markdown output.
+> **Architected by Lemo**  
+> An enterprise-grade, modular, pure HTTP OpenAI-compatible AI Agent Infrastructure. Bridges **Google Gemini Web** to OpenAI API endpoints (`/v1/chat/completions`, `/v1/models`, `/v1/responses`), features a **Universal Tool Calling Engine**, **Autonomous Agent Orchestrator**, **Local Agent Runtime** (WebSocket secure tunneling), **Cloud Isolation Runtime** (Docker + Process fallback), **Model Context Protocol (MCP)** server/client, **Persistent Fact Memory**, **Multi-Agent Pipeline Coordinator**, and a real-time **Developer Admin Dashboard**. Fully benchmark-verified against the **DeepSeek AI Harness**.
 
 ---
 
-## 📋 Supported Models
+## 🌟 Key Subsystems & Highlights
 
-| Model ID | Description | Best For |
-| :--- | :--- | :--- |
-| `gemini-flash` | Google Gemini 2.5 Flash / Gemini 3 Flash | Fast everyday tasks, coding, general chat |
-| `gemini-2.5-flash` | Google Gemini 2.5 Flash Flagship Speed Alias | High throughput, quick responses |
-| `gemini-pro` | Google Gemini 2.5 Pro / Gemini 3 Pro | Complex problem solving, multi-step coding |
-| `gemini-2.5-pro` | Google Gemini 2.5 Pro Alias | In-depth analysis and architecture |
-| `gemini-thinking` | Google Gemini Thinking Model | Deep mathematical, logical, and code reasoning |
-| `gemini-2.5-thinking` | Google Gemini 2.5 Thinking | Advanced reasoning with thoughts stream |
-| `gemini-lite` | Google Gemini Lite | Lightweight tasks and minimal latency |
+- **⚡ 100% Pure HTTP Gemini Web Bridge**:
+  - Direct HTTP streaming via `gemini-web-sdk` 2.3.0.
+  - Zero Puppeteer, Playwright, or headless browser requirements.
+  - No CAPTCHAs, low latency, and zero display server dependencies.
+- **👥 Dual Gemini Operational Modes**:
+  - **Guest Mode (Default)**: Fully anonymous, instant out-of-the-box usage with zero API keys or cookies.
+  - **Account Mode**: Pass `__Secure-1PSID` / `__Secure-1PSIDTS` via `.env` or client `Authorization: Bearer <cookie>` to access user quotas and advanced capabilities.
+- **🛠️ Dual Tool Execution Modes**:
+  - **Mode A (IDE-Managed Tool Calling)**: Standard OpenAI `tools` definitions parsed and returned via standard `tool_calls` for IDE execution (Cursor, Continue, Cline, DeepSeek Harness).
+  - **Mode B (Agent-Managed Execution)**: Autonomous internal execution through the Universal Tool Dispatcher across local workspace and cloud sandboxes.
+- **🤖 Autonomous Agent Orchestrator**:
+  - Full multi-step loop: Inspect -> Plan -> Tool Execution -> Error Detection -> Self-Healing Recovery -> Completion Verification.
+  - Configurable safety caps: max iterations, max retries, execution timeouts, and human-in-the-loop approvals.
+- **💻 Local Agent Runtime (Outbound WSS)**:
+  - Secure outbound WebSocket connection (`/v1/runtime/tunnel`) requiring no open public ports.
+  - Cryptographic device pairing tokens.
+  - Sandboxed file system operations (path traversal protection), terminal execution (PowerShell/Bash), Git operations, and project diagnostic tools.
+- **🐳 Cloud Isolation Runtime**:
+  - Container-based isolated execution (`DockerManager`) with automatic graceful fallback to hardened child process isolation when Docker daemon is not active.
+- **🔌 Model Context Protocol (MCP)**:
+  - Compliant with Anthropic MCP specification `2024-11-05` over JSON-RPC 2.0.
+  - Built-in MCP Server (`POST /v1/mcp`) exposing all registered tools, and MCP Client (`MCPClient`) for external server federation.
+- **🧠 Persistent Memory & Multi-Agent Pipelines**:
+  - File-backed persistent fact store (`PersistentMemory`) across sessions.
+  - Multi-agent collaboration pipeline (`MultiAgentCoordinator`) orchestrating Architect, Developer, Reviewer, Debugger, and QA Tester roles.
+- **📊 Real-time Developer Dashboard**:
+  - Built-in dark UI (`GET /dashboard`) with live metrics, active agent runs, registered tools, connected runtimes, and Gemini status.
+- **🎯 DeepSeek Benchmark Harness Compatibility**:
+  - Fully compatible with `https://github.com/DeepSeek-ai/deepseek-harness`.
+  - Conforms to OpenAI models discovery, chat completions schema, error structures, and HTTP 429 rate limiter headers (`Retry-After`).
 
 ---
 
-## 🏗️ Architecture & Project Structure
+## 📋 Model Catalog
+
+| Model ID | Description | Reasoning Stream | Best For |
+| :--- | :--- | :---: | :--- |
+| `gemini-flash` | Google Gemini 2.5 Flash / Gemini 3 Flash | No | Fast everyday coding, completions, DeepSeek Harness |
+| `gemini-2.5-flash` | Google Gemini 2.5 Flash Flagship Speed Alias | No | High throughput, quick responses |
+| `gemini-pro` | Google Gemini 2.5 Pro / Gemini 3 Pro | No | Complex problem solving, architectural planning |
+| `gemini-2.5-pro` | Google Gemini 2.5 Pro Alias | No | In-depth refactoring, multi-file analysis |
+| `gemini-thinking` | Google Gemini Thinking Model | ✅ Yes | Deep mathematical, algorithmic, and code reasoning |
+| `gemini-2.5-thinking` | Google Gemini 2.5 Thinking | ✅ Yes | Advanced reasoning with live thought tokens |
+| `gemini-lite` | Google Gemini Lite | No | Lightweight tasks and minimal latency |
+
+---
+
+## 🏗️ Architecture & Project Directory Structure
 
 ```text
-Arena/
+gemini-web-to-openai-proxy/
 ├── src/
-│   ├── config/              # Server configuration and model catalog
-│   │   └── index.js
-│   ├── controllers/         # Express API controllers (/v1/chat/completions, /v1/models)
-│   │   ├── chatController.js
-│   │   └── modelsController.js
-│   ├── providers/           # Provider abstraction layer
-│   │   ├── BaseProvider.js
-│   │   ├── gemini/
-│   │   │   ├── GeminiEngine.js  # Core engine (Guest & Account Mode, streaming, tool handling)
-│   │   │   └── index.js
-│   │   └── index.js         # Provider registry
-│   ├── routes/              # Express API route definitions
-│   │   └── v1.js
-│   ├── utils/               # SSE formatting, DSML tool parser, logging
-│   │   ├── dsmlParser.js
-│   │   ├── logger.js
-│   │   └── sse.js
-│   ├── app.js               # Express application setup & middleware
-│   └── server.js            # Main server entrypoint
-├── .env.example             # Example environment file
-├── .gitignore
-├── package.json
-└── README.md
+│   ├── app.js                         # Express application setup & middleware pipeline
+│   ├── server.js                      # Server entry point & WebSocket server mount
+│   │
+│   ├── config/
+│   │   └── index.js                   # Environment config, model catalog & aliases
+│   │
+│   ├── middleware/
+│   │   ├── auth.js                    # Bearer PROXY_API_KEY authentication guard
+│   │   ├── validation.js              # Request body & parameters schema validator
+│   │   └── rateLimiter.js             # IP-based rate limiter with 429 Retry-After headers
+│   │
+│   ├── controllers/
+│   │   ├── chatController.js          # /v1/chat/completions (SSE & non-streaming, DSML)
+│   │   ├── modelsController.js        # /v1/models & /v1/models/:model discovery
+│   │   └── responsesController.js     # /v1/responses endpoint
+│   │
+│   ├── providers/
+│   │   ├── BaseProvider.js            # Provider interface contract
+│   │   ├── index.js                   # Provider registry
+│   │   └── gemini/
+│   │       ├── GeminiEngine.js        # Gemini Web client, Guest/Account modes, session management
+│   │       └── index.js
+│   │
+│   ├── tools/                         # Universal Tool Calling Subsystem
+│   │   ├── registry/                  # ToolRegistry, ToolSchema, ToolDiscovery
+│   │   ├── adapters/                  # OpenAIToolAdapter, GeminiToolAdapter, MCPToolAdapter
+│   │   ├── dispatcher/                # ToolDispatcher, ToolValidator, ToolResultFormatter
+│   │   └── builtins/                  # echo, calculator, system_info
+│   │
+│   ├── runtime/
+│   │   ├── local/                     # Local Agent Runtime
+│   │   │   ├── WorkspaceManager.js    # Authorized roots & path traversal defense
+│   │   │   ├── TerminalManager.js     # PowerShell / Bash execution with timeouts
+│   │   │   ├── DeviceManager.js       # Device registration & pairing token manager
+│   │   │   ├── wss/                   # WebSocket server tunnel handler
+│   │   │   └── tools/                 # FS, Terminal, Git, Project, DevTools
+│   │   └── cloud/                     # Cloud Isolation Runtime (Docker & Process fallback)
+│   │       ├── DockerManager.js
+│   │       ├── ContainerManager.js
+│   │       └── CloudRuntime.js
+│   │
+│   ├── agent/                         # Autonomous Agent Orchestration
+│   │   ├── AgentState.js              # FSM (idle, planning, executing, paused, completed, failed)
+│   │   ├── AgentEvents.js             # Event emitter for lifecycle hooks
+│   │   ├── AgentMemory.js             # In-memory execution context
+│   │   ├── AgentContext.js            # Context window manager & token budgeting
+│   │   ├── AgentCancellation.js       # Abort controller & task cancellation tokens
+│   │   ├── AgentRecovery.js           # Self-healing & error recovery strategies
+│   │   ├── AgentPlanner.js            # Structured task decomposition
+│   │   ├── AgentExecutor.js           # Tool execution coordinator
+│   │   ├── AgentLoop.js               # Multi-step iteration loop with safety caps
+│   │   ├── AgentOrchestrator.js       # Top-level lifecycle manager
+│   │   └── MultiAgentCoordinator.js   # Multi-agent role pipeline (Architect -> Dev -> QA)
+│   │
+│   ├── memory/
+│   │   └── PersistentMemory.js        # Persistent fact store & session state storage
+│   │
+│   ├── integrations/
+│   │   └── mcp/                       # Model Context Protocol (2024-11-05)
+│   │       ├── MCPServer.js           # MCP Server exposing tools via JSON-RPC 2.0
+│   │       ├── MCPClient.js           # MCP Client connecting to external servers
+│   │       └── mcpServerManager.js
+│   │
+│   ├── dashboard/                     # Developer Admin Dashboard
+│   │   ├── index.html                 # Modern responsive dark-mode UI
+│   │   └── dashboardRouter.js         # /dashboard & /dashboard/api/stats
+│   │
+│   ├── routes/
+│   │   └── v1.js                      # Express v1 router mounting all subsystems
+│   │
+│   └── utils/
+│       ├── dsmlParser.js              # DeepSeek DSML & <tool_call> parser
+│       ├── sse.js                     # Server-Sent Events stream generator
+│       └── logger.js                  # Structured colored logger
+│
+├── tests/                             # 54 Automated Deterministic Tests
+│   ├── baseline.test.mjs              # Phase 0 Baseline tests (8 tests)
+│   ├── phase1_foundation.test.mjs     # Security & Validation tests (6 tests)
+│   ├── phase2_tools.test.mjs          # Tool Engine tests (8 tests)
+│   ├── phase3_local_runtime.test.mjs  # Local Runtime & FS sandbox tests (6 tests)
+│   ├── phase4_agent.test.mjs          # Agent Orchestrator tests (7 tests)
+│   ├── phase5_cloud_runtime.test.mjs  # Cloud Runtime & Isolation tests (3 tests)
+│   ├── phase6_dev_tools.test.mjs      # DevTools & Search tests (4 tests)
+│   ├── phase7_mcp.test.mjs            # MCP JSON-RPC protocol tests (4 tests)
+│   ├── phase8_memory.test.mjs         # Memory & Multi-Agent tests (3 tests)
+│   ├── phase9_dashboard.test.mjs      # Developer Dashboard tests (2 tests)
+│   └── phase10_deepseek_harness.test.mjs # DeepSeek Harness verification (3 tests)
+│
+└── docs/                              # Comprehensive Documentation Suite
+    ├── ARCHITECTURE.md                # System Architecture & Subsystem Interactions
+    ├── IMPLEMENTATION_STATUS.md       # Full roadmap execution status & test ledger
+    ├── DEEPSEEK_HARNESS.md            # DeepSeek benchmark harness configuration
+    ├── API_REFERENCE.md               # Complete REST API reference
+    ├── TOOL_SYSTEM.md                 # Universal Tool Engine documentation
+    ├── AGENT_ENGINE.md                # Agent Orchestrator & Loop guide
+    ├── LOCAL_RUNTIME.md               # Local Runtime & WSS tunnel guide
+    ├── CLOUD_RUNTIME.md               # Cloud Docker sandbox & Process isolation
+    ├── MCP_INTEGRATION.md             # Model Context Protocol integration guide
+    ├── SECURITY.md                    # Security architecture & sandbox policies
+    ├── IDE_COMPATIBILITY.md           # Setup guides for Cursor, Continue, Aider, Cline
+    ├── DEPLOYMENT.md                  # Production deployment & Docker recipes
+    └── TROUBLESHOOTING.md             # Diagnostics & troubleshooting runbook
 ```
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Prerequisites
-- [Node.js](https://nodejs.org/) v18.0.0 or higher.
+### 1. Requirements
+- [Node.js](https://nodejs.org/) v18.0.0 or higher (v20+ or v22 LTS recommended).
 - [npm](https://www.npmjs.com/) installed.
 
 ### 2. Installation
-Clone the repository and install dependencies:
 ```bash
 git clone https://github.com/iilemoz/gemini-web-to-openai-proxy.git
 cd gemini-web-to-openai-proxy
 npm install
 ```
 
-### 3. Environment Configuration
+### 3. Configuration
 Copy the sample environment file:
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
-Open `.env` in your text editor:
+Configure your `.env`:
 ```env
 PORT=3000
 HOST=0.0.0.0
 DEFAULT_MODEL=gemini-flash
 
-# Optional: Add your Google Gemini cookie for Account Mode (leave blank for Guest Mode)
+# Optional: Proxy API Key (if set, clients must send Authorization: Bearer <key>)
+PROXY_API_KEY=
+
+# Optional: Gemini Account Mode cookie (leave blank for Anonymous Guest Mode)
 GEMINI_SECURE_1PSID=
 GEMINI_SECURE_1PSIDTS=
 
-# Optional: Set a secret key to protect your proxy endpoint
-PROXY_API_KEY=
+# Rate Limiting
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_MAX=120
+RATE_LIMIT_WINDOW_MS=60000
+
+# Local Runtime Workspace Root (defaults to current working directory)
+WORKSPACE_ROOT=
 ```
 
-### 4. Run the Server
-- **Production Mode:**
-  ```bash
-  npm start
-  ```
-- **Development Mode (Auto-reload on file changes):**
-  ```bash
-  npm run dev
-  ```
-
-The server will start listening at `http://127.0.0.1:3000`.
-
----
-
-## ⚙️ Guest Mode vs Account Mode
-
-- **Guest Mode (Default)**:
-  - If `GEMINI_SECURE_1PSID` is left empty in `.env`, the proxy operates automatically in anonymous Guest Mode.
-  - Requires no setup or account.
-- **Account Mode**:
-  - Log in to [gemini.google.com](https://gemini.google.com).
-  - Open Browser DevTools (`F12`) -> **Application** -> **Cookies** -> `https://gemini.google.com`.
-  - Copy the value of `__Secure-1PSID` (and optionally `__Secure-1PSIDTS`).
-  - Paste into your `.env` file or pass as `Authorization: Bearer <__Secure-1PSID>` in your HTTP requests.
-
----
-
-## 📡 Usage Examples
-
-### 1. List Available Models
+### 4. Running the Server
 ```bash
-curl http://localhost:3000/v1/models
+# Start in production mode
+npm start
+
+# Start in development mode with auto-reload
+npm run dev
 ```
 
-### 2. Chat Completion (Non-Streaming)
-```bash
-curl http://localhost:3000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemini-flash",
-    "messages": [
-      {"role": "user", "content": "Explain quantum computing in one sentence."}
-    ],
-    "stream": false
-  }'
-```
+The server starts on `http://localhost:3000`.
+- **Developer Dashboard**: `http://localhost:3000/dashboard`
+- **Health Check**: `http://localhost:3000/healthz`
+- **Models List**: `http://localhost:3000/v1/models`
 
-### 3. Chat Completion (Streaming)
+### 5. Running the Test Suite
+Run all 54 automated deterministic tests across all 10 phases:
 ```bash
-curl -N http://localhost:3000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemini-flash",
-    "messages": [
-      {"role": "user", "content": "Write a 3-line poem about space."}
-    ],
-    "stream": true
-  }'
+npm test
 ```
 
 ---
 
-## 🐍 Python OpenAI SDK Integration
+## 🔌 API Endpoints Summary
 
-Use the official `openai` Python SDK with this proxy:
-
-```python
-from openai import OpenAI
-
-# Point client to your local proxy
-client = OpenAI(
-    base_url="http://localhost:3000/v1",
-    api_key="sk-dummy"  # or your PROXY_API_KEY if configured
-)
-
-response = client.chat.completions.create(
-    model="gemini-flash",
-    messages=[
-        {"role": "system", "content": "You are a helpful coding assistant."},
-        {"role": "user", "content": "Write a Python function to check for prime numbers."}
-    ],
-    stream=True
-)
-
-for chunk in response:
-    content = chunk.choices[0].delta.content or ""
-    print(content, end="", flush=True)
-print()
-```
+| Endpoint | Method | Description |
+| :--- | :---: | :--- |
+| `/v1/chat/completions` | `POST` | OpenAI-compatible chat completions (Streaming SSE & Non-Streaming) |
+| `/v1/models` | `GET` | List available Gemini models |
+| `/v1/models/:model` | `GET` | Retrieve specific model details |
+| `/v1/responses` | `POST` | Simplified responses API |
+| `/v1/tools` | `GET` | Discover all registered tools with JSON schemas |
+| `/v1/runtime/devices` | `POST` | Register a new device for Local Runtime pairing |
+| `/v1/runtime/sessions`| `GET` | List active Local Runtime WebSocket sessions |
+| `/v1/runtime/cloud/status` | `GET` | Cloud runtime status (Docker daemon detection) |
+| `/v1/runtime/cloud/sandboxes` | `POST` | Create an isolated sandbox environment |
+| `/v1/agents` | `GET` | List available autonomous agent roles & capabilities |
+| `/v1/agent/runs` | `POST` | Create and start an autonomous agent execution run |
+| `/v1/agent/runs/:id` | `GET` | Inspect status, plan, and history of an agent run |
+| `/v1/agent/runs/:id/cancel` | `POST` | Cancel an active agent run |
+| `/v1/agent/runs/:id/approve`| `POST` | Human-in-the-loop tool execution approval |
+| `/v1/agent/pipeline` | `POST` | Execute multi-agent collaborative pipeline |
+| `/v1/mcp` | `POST` | Model Context Protocol JSON-RPC 2.0 endpoint |
+| `/v1/mcp/servers` | `GET` | List connected external MCP servers |
+| `/dashboard` | `GET` | Developer Admin Dashboard UI |
+| `/dashboard/api/stats` | `GET` | Aggregated real-time metrics |
+| `/healthz` | `GET` | High-availability readiness probe |
 
 ---
 
-## 🟨 Node.js OpenAI SDK Integration
+## 🎯 DeepSeek Harness Compatibility
 
-```javascript
-import OpenAI from 'openai';
+This infrastructure is engineered and verified to support the **DeepSeek Evaluation Harness** (`https://github.com/DeepSeek-ai/deepseek-harness`).
 
-const openai = new OpenAI({
-  baseURL: 'http://127.0.0.1:3000/v1',
-  apiKey: 'sk-dummy'
-});
+Configure DeepSeek Harness with:
+```yaml
+openai_api_base: "http://127.0.0.1:3000/v1"
+openai_api_key: "none"  # Or your PROXY_API_KEY
+model: "gemini-flash"   # Or gemini-thinking, gemini-pro
+temperature: 0.0
+```
+For complete setup, evaluation examples, and benchmark execution instructions, see [docs/DEEPSEEK_HARNESS.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/DEEPSEEK_HARNESS.md).
 
-async function main() {
-  const stream = await openai.chat.completions.create({
-    model: 'gemini-thinking',
-    messages: [{ role: 'user', content: 'What is 25 * 48? Think step by step.' }],
-    stream: true,
-  });
+---
 
-  for await (const chunk of stream) {
-    process.stdout.write(chunk.choices[0]?.delta?.content || '');
-  }
-  console.log();
+## 💻 IDE Integration Quick Guides
+
+### Cursor
+1. Go to **Settings** > **Features** > **AI Models**.
+2. Set **OpenAI Base URL** to `http://localhost:3000/v1`.
+3. Set **OpenAI API Key** to any string (or your `PROXY_API_KEY`).
+4. Select `gemini-flash` or `gemini-pro`.
+
+### Continue (VS Code & JetBrains)
+In your `~/.continue/config.json`:
+```json
+{
+  "models": [
+    {
+      "title": "Gemini Flash (Local Proxy)",
+      "provider": "openai",
+      "model": "gemini-flash",
+      "apiBase": "http://localhost:3000/v1",
+      "apiKey": "any-string"
+    }
+  ]
 }
-
-main();
 ```
 
----
+### Cline / Roo-Code
+1. Choose **OpenAI Compatible** provider.
+2. Base URL: `http://localhost:3000/v1`.
+3. Model ID: `gemini-flash`.
+4. API Key: `any-string` (or `PROXY_API_KEY`).
 
-## 🛠️ Function / Tool Calling
-
-The proxy translates standard OpenAI tool definitions into executable instructions and packages the result into the OpenAI `tool_calls` format:
-
-```bash
-curl http://localhost:3000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemini-flash",
-    "messages": [
-      {"role": "user", "content": "Write a python file named calc.py with an add function"}
-    ],
-    "tools": [
-      {
-        "type": "function",
-        "function": {
-          "name": "write_file",
-          "description": "Writes code to disk",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "path": {"type": "string"},
-              "content": {"type": "string"}
-            },
-            "required": ["path", "content"]
-          }
-        }
-      }
-    ],
-    "tool_choice": "auto"
-  }'
-```
+For additional IDE configurations (Aider, Claude Dev, etc.), see [docs/IDE_COMPATIBILITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IDE_COMPATIBILITY.md).
 
 ---
 
-## 👤 Author & Credits
+## 📖 Comprehensive Documentation
 
-- **Creator & Maintainer:** **Lemo**
-- **Project:** Gemini Web to OpenAI API Proxy
-
-Feel free to open issues, submit pull requests, or star ⭐ the repository if you find this project helpful!
+| Document | Purpose |
+| :--- | :--- |
+| [ARCHITECTURE.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/ARCHITECTURE.md) | Subsystem architecture, component diagrams, and data flows |
+| [IMPLEMENTATION_STATUS.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IMPLEMENTATION_STATUS.md) | Complete roadmap milestone tracking and test verification logs |
+| [DEEPSEEK_HARNESS.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/DEEPSEEK_HARNESS.md) | DeepSeek Harness benchmark integration and testing guide |
+| [API_REFERENCE.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/API_REFERENCE.md) | Full endpoint specifications, parameters, and payloads |
+| [TOOL_SYSTEM.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/TOOL_SYSTEM.md) | Tool Registry, Schema definitions, and custom tool creation |
+| [AGENT_ENGINE.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/AGENT_ENGINE.md) | Autonomous Agent Orchestrator, planning, and execution loop |
+| [LOCAL_RUNTIME.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/LOCAL_RUNTIME.md) | Outbound WebSocket tunnel, Workspace sandboxing, and terminal execution |
+| [CLOUD_RUNTIME.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/CLOUD_RUNTIME.md) | Docker container management and graceful process isolation fallback |
+| [MCP_INTEGRATION.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/MCP_INTEGRATION.md) | Model Context Protocol server/client guide |
+| [SECURITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/SECURITY.md) | Threat modeling, sandboxing policies, and authentication design |
+| [IDE_COMPATIBILITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IDE_COMPATIBILITY.md) | Client integration guides for Cursor, Continue, Aider, and Cline |
+| [DEPLOYMENT.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/DEPLOYMENT.md) | Systemd, PM2, Docker, and reverse proxy deployment guide |
+| [TROUBLESHOOTING.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/TROUBLESHOOTING.md) | Diagnostic workflows, known issues, and recovery procedures |
 
 ---
 
-## 📄 License
+## 🛡️ License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT License. See [LICENSE](LICENSE) for details.
+
+### Author & Credits
+- **Project Architect & Maintainer**: **Lemo**
