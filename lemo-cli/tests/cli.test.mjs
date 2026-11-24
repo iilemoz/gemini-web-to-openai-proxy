@@ -52,7 +52,9 @@ test('CLI: chat command accepts --help and describes streaming chat', async () =
   assert.ok(stdout.includes('--model'));
 });
 
-test('CLI: agent command displays planned Phase 4.2 notice', async () => {
-  const { stdout } = await execFileAsync(process.execPath, [BIN_PATH, 'agent']);
-  assert.ok(stdout.includes('Agent Mode is scheduled for implementation in Phase 4.2'));
+test('CLI: agent command accepts --help and describes interactive agent mode', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [BIN_PATH, 'agent', '--help']);
+  assert.ok(stdout.includes('Start interactive AI Coding Agent Mode with tools'));
+  assert.ok(stdout.includes('--workspace'));
+  assert.ok(stdout.includes('--model'));
 });

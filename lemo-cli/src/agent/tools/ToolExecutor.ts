@@ -78,14 +78,31 @@ export class ToolExecutor {
 
     // 5. Evaluate approval policy
     try {
+      context?.onEvent?.('tool_approval_requested', {
+        id: toolCall.id,
+        name: tool.name,
+        permissions: tool.permissions,
+        arguments: parsedArgs
+      });
+
       const decision = await this.approvalPolicy.evaluate(tool, parsedArgs, context);
       if (!decision.approved) {
+        context?.onEvent?.('tool_approval_denied', {
+          id: toolCall.id,
+          name: tool.name,
+          reason: decision.reason || 'Not approved'
+        });
         return {
           success: false,
           error: `Execution denied by policy: ${decision.reason || 'Not approved'}`,
           durationMs: Date.now() - startTime
         };
       }
+
+      context?.onEvent?.('tool_approval_granted', {
+        id: toolCall.id,
+        name: tool.name
+      });
     } catch (policyErr) {
       return {
         success: false,

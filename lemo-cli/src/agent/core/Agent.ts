@@ -25,12 +25,12 @@ import { AgentExecutionError } from '../../core/errors/index.js';
 import { logger } from '../../core/logging/index.js';
 
 export interface AgentOptions {
-  client?: LemoApiClient;
-  config?: LemoConfig;
-  registry?: ToolRegistry;
-  approvalPolicy?: ApprovalPolicy;
-  executionPolicy?: ExecutionPolicy;
-  defaultModel?: string;
+  client?: LemoApiClient | undefined;
+  config?: LemoConfig | undefined;
+  registry?: ToolRegistry | undefined;
+  approvalPolicy?: ApprovalPolicy | undefined;
+  executionPolicy?: ExecutionPolicy | undefined;
+  defaultModel?: string | undefined;
 }
 
 export class Agent {
@@ -112,6 +112,7 @@ export class Agent {
     };
     if (options.systemPrompt) contextOptions.systemPrompt = options.systemPrompt;
     if (options.signal) contextOptions.signal = options.signal;
+    if (options.initialMessages) contextOptions.initialMessages = options.initialMessages;
     if (this.config.defaultWorkspace) contextOptions.workspace = this.config.defaultWorkspace;
 
     const context = new AgentContext(contextOptions);

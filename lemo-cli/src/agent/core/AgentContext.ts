@@ -12,6 +12,7 @@ export interface AgentContextOptions {
   systemPrompt?: string | undefined;
   signal?: AbortSignal | undefined;
   workspace?: string | undefined;
+  initialMessages?: ChatMessage[] | undefined;
 }
 
 export class AgentContext {
@@ -39,6 +40,15 @@ export class AgentContext {
         role: 'system',
         content: options.systemPrompt.trim()
       });
+    }
+
+    // Append prior conversational messages if provided
+    if (options.initialMessages && options.initialMessages.length > 0) {
+      for (const msg of options.initialMessages) {
+        // Avoid duplicating system prompt if already added
+        if (msg.role === 'system' && options.systemPrompt) continue;
+        this.messages.push(msg);
+      }
     }
 
     // Add initial user task message

@@ -3,12 +3,13 @@
  */
 
 import { Command } from 'commander';
-import pc from 'picocolors';
 import { printBanner, CLI_VERSION } from './interface/banner.js';
 import { createConfigCommand } from './commands/config.js';
 import { logger } from '../core/logging/index.js';
 import { formatErrorMessage } from '../core/errors/index.js';
+import { ConfigManager } from '../core/config/index.js';
 import { startChatSession } from '../chat/index.js';
+import { startAgentSession } from '../agent/index.js';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -28,7 +29,12 @@ export function buildProgram(): Command {
       }
     })
     .action(async () => {
-      await startChatSession();
+      const config = ConfigManager.load();
+      if (config.defaultMode === 'agent') {
+        await startAgentSession({ config });
+      } else {
+        await startChatSession({ config });
+      }
     });
 
   // Attach configuration subcommands
@@ -43,16 +49,17 @@ export function buildProgram(): Command {
       await startChatSession({ modelOverride: cmdOpts.model });
     });
 
-  // Architectural boundary placeholder: Agent Mode (Phase 4.2)
+  // Interactive Agent Mode
   program
     .command('agent')
-    .description('Autonomous AI Coding Agent Mode with tools (Scheduled for Phase 4.2)')
+    .description('Start interactive AI Coding Agent Mode with tools')
     .option('-w, --workspace <dir>', 'Target workspace directory')
-    .option('-m, --model <model>', 'Model override')
-    .action(() => {
-      printBanner();
-      logger.info(pc.cyan('Agent Mode is scheduled for implementation in Phase 4.2.'));
-      logger.info('Please run "lemo config show" or "lemo --help" to inspect current options.');
+    .option('-m, --model <model>', 'Model override (e.g. gemini-flash, gemini-pro)')
+    .action(async (cmdOpts: { workspace?: string; model?: string }) => {
+      await startAgentSession({
+        workspace: cmdOpts.workspace,
+        modelOverride: cmdOpts.model
+      });
     });
 
   // Custom help formatting

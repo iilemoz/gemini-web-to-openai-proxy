@@ -13,3 +13,6 @@ export * from './core/AgentState.js';
 export * from './core/AgentContext.js';
 export * from './core/AgentLoop.js';
 export * from './core/Agent.js';
+export * from './tools/builtin/EchoTool.js';
+export * from './session/AgentSession.js';
+export * from './repl/AgentRepl.js';

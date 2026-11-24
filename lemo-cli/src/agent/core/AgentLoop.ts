@@ -151,6 +151,20 @@ export class AgentLoop {
           };
           if (context.signal) execContext.signal = context.signal;
           if (context.workspace) execContext.workspace = context.workspace;
+          execContext.onEvent = (type, payload) => {
+            if (type === 'tool_approval_requested') {
+              if (state.status !== 'waiting_approval') {
+                state.transitionTo('waiting_approval');
+                emitEvent('state_change', { status: 'waiting_approval' });
+              }
+            } else if (type === 'tool_approval_granted' || type === 'tool_approval_denied') {
+              if (state.status === 'waiting_approval') {
+                state.transitionTo('executing_tool');
+                emitEvent('state_change', { status: 'executing_tool' });
+              }
+            }
+            emitEvent(type, payload);
+          };
 
           const result = await this.executor.execute(toolCall, execContext);
 

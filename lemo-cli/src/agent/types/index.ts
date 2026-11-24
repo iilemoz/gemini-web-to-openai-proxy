@@ -35,6 +35,7 @@ export interface ToolExecutionContext {
   toolCallId: string;
   signal?: AbortSignal | undefined;
   workspace?: string | undefined;
+  onEvent?: ((type: AgentEventType, payload: Record<string, unknown>) => void) | undefined;
 }
 
 export interface ApprovalDecision {
@@ -72,6 +73,7 @@ export interface AgentRunOptions {
   systemPrompt?: string | undefined;
   maxIterations?: number | undefined;
   timeoutMs?: number | undefined;
+  initialMessages?: ChatMessage[] | undefined;
 }
 
 export interface AgentRunResult {
