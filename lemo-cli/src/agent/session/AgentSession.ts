@@ -10,7 +10,14 @@ import type { BackendModel } from '../../core/types/models.js';
 import type { ChatMessage } from '../../api/types/request.js';
 import { Agent } from '../core/Agent.js';
 import type { Tool } from '../tools/Tool.js';
-import { EchoTool } from '../tools/builtin/EchoTool.js';
+import {
+  EchoTool,
+  ListFilesTool,
+  ReadFileTool,
+  SearchFilesTool,
+  FileInfoTool
+} from '../tools/builtin/index.js';
+import { WorkspaceManager } from '../workspace/WorkspaceManager.js';
 import type { ApprovalPolicy } from '../policies/ApprovalPolicy.js';
 import type { AgentRunResult } from '../types/index.js';
 import type { CommandResult } from '../../chat/types.js';
@@ -28,6 +35,7 @@ export class AgentSession {
   private readonly client: LemoApiClient;
   private readonly config: LemoConfig;
   private readonly agent: Agent;
+  private readonly workspaceManager: WorkspaceManager;
   private activeModel: string;
   private workspace: string;
   private availableModels: BackendModel[] = [];
@@ -42,11 +50,26 @@ export class AgentSession {
     });
     this.client = (this.agent as unknown as { client: LemoApiClient }).client || options.client!;
     this.activeModel = options.modelOverride?.trim() || options.config.defaultModel || 'gemini-flash';
-    this.workspace = options.workspace || options.config.defaultWorkspace || process.cwd();
 
-    // Register harmless default test tool if not already present
+    const rawWorkspace = options.workspace || options.config.defaultWorkspace || process.cwd();
+    this.workspaceManager = new WorkspaceManager(rawWorkspace);
+    this.workspace = this.workspaceManager.getRoot();
+
+    // Register built-in tools if not already present
     if (!this.agent.registry.has('test_echo')) {
       this.agent.registerTool(new EchoTool());
+    }
+    if (!this.agent.registry.has('list_files')) {
+      this.agent.registerTool(new ListFilesTool(this.workspaceManager));
+    }
+    if (!this.agent.registry.has('read_file')) {
+      this.agent.registerTool(new ReadFileTool(this.workspaceManager));
+    }
+    if (!this.agent.registry.has('search_files')) {
+      this.agent.registerTool(new SearchFilesTool(this.workspaceManager));
+    }
+    if (!this.agent.registry.has('file_info')) {
+      this.agent.registerTool(new FileInfoTool(this.workspaceManager));
     }
   }
 
@@ -276,7 +299,8 @@ export class AgentSession {
       modelOverride: this.activeModel,
       signal: options.signal,
       systemPrompt: options.systemPrompt,
-      initialMessages: this.history
+      initialMessages: this.history,
+      workspace: this.workspace
     });
 
     if (runResult.messages && runResult.messages.length > 0) {

@@ -74,6 +74,7 @@ export interface AgentRunOptions {
   maxIterations?: number | undefined;
   timeoutMs?: number | undefined;
   initialMessages?: ChatMessage[] | undefined;
+  workspace?: string | undefined;
 }
 
 export interface AgentRunResult {

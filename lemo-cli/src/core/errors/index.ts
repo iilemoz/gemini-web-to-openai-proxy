@@ -74,6 +74,20 @@ export class PolicyViolationError extends LemoError {
   }
 }
 
+/** Security exception such as path traversal, symlink escape, or sensitive file access */
+export class SecurityError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'SECURITY_ERROR', details);
+  }
+}
+
+/** Error related to workspace path resolution, validation, or filesystem access */
+export class WorkspaceError extends LemoError {
+  constructor(message: string, details?: unknown) {
+    super(message, 'WORKSPACE_ERROR', details);
+  }
+}
+
 /**
  * Formats an error into a clean user-facing terminal message,
  * ensuring no sensitive stack traces or raw tokens are exposed.

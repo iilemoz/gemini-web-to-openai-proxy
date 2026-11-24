@@ -113,7 +113,11 @@ export class Agent {
     if (options.systemPrompt) contextOptions.systemPrompt = options.systemPrompt;
     if (options.signal) contextOptions.signal = options.signal;
     if (options.initialMessages) contextOptions.initialMessages = options.initialMessages;
-    if (this.config.defaultWorkspace) contextOptions.workspace = this.config.defaultWorkspace;
+    if (options.workspace) {
+      contextOptions.workspace = options.workspace;
+    } else if (this.config.defaultWorkspace) {
+      contextOptions.workspace = this.config.defaultWorkspace;
+    }
 
     const context = new AgentContext(contextOptions);
     const state = new AgentState('idle');
