@@ -1,12 +1,13 @@
 /**
  * Builtin Tool: read_file
- * Reads the contents of a text file inside the workspace with pagination and byte limits.
+ * Reads the contents of a text file inside the workspace with line range and size protection.
+ * Hardened against TOCTOU race conditions and symlink swaps using atomic file descriptor access.
  */
 
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
 import { Tool } from '../Tool.js';
 import type { ToolPermission, ToolResult, ToolExecutionContext } from '../../types/index.js';
-import { WorkspaceManager } from '../../workspace/WorkspaceManager.js';
+import { WorkspaceManager, isPathInside } from '../../workspace/WorkspaceManager.js';
 import { SecurityError } from '../../../core/errors/index.js';
 
 export class ReadFileTool extends Tool {
@@ -54,31 +55,60 @@ export class ReadFileTool extends Tool {
       ? Math.min(Math.floor(args['max_bytes']), 1048576)
       : 262144;
 
+    let handle: fs.promises.FileHandle | null = null;
+
     try {
+      // 1. Initial canonical resolution and sensitive check
       const resolved = ws.resolvePath(filePathArg);
       ws.assertNotSensitive(resolved);
 
-      let stat;
+      // 2. Open file descriptor atomically
+      // On POSIX platforms, apply O_NOFOLLOW to reject symlink dereferencing at the kernel level.
+      // On Windows, O_NOFOLLOW is unsupported by libuv/NTFS CreateFile, so we perform post-open
+      // canonical containment checks on the opened target.
+      const openFlags = fs.constants.O_RDONLY | (process.platform !== 'win32' ? (fs.constants.O_NOFOLLOW ?? 0) : 0);
+
       try {
-        stat = await fs.stat(resolved);
+        handle = await fs.promises.open(resolved, openFlags);
       } catch (err: unknown) {
-        if ((err as { code?: string }).code === 'ENOENT') {
+        const code = (err as { code?: string }).code;
+        if (code === 'ENOENT') {
           return { success: false, error: `File not found: '${filePathArg}'` };
+        }
+        if (code === 'ELOOP') {
+          return { success: false, error: `Security Exception: Symlink loop or unpermitted symlink dereferencing: '${filePathArg}'` };
         }
         throw err;
       }
 
+      // 3. Validate file descriptor identity
+      const stat = await handle.stat();
       if (stat.isDirectory()) {
         return { success: false, error: `Path is a directory, not a file: '${filePathArg}'` };
       }
 
-      // Check if file is binary
-      if (await ws.isBinary(resolved)) {
-        return { success: false, error: `Cannot read binary file '${filePathArg}' as text.` };
+      // 4. Post-open containment re-validation (TOCTOU defense)
+      const currentCanonical = fs.realpathSync(resolved);
+      if (!isPathInside(ws.getRoot(), currentCanonical)) {
+        throw new SecurityError(`Security Exception: File path swapped with out-of-workspace link during access: '${filePathArg}'`);
+      }
+      ws.assertNotSensitive(currentCanonical);
+
+      // 5. Binary file inspection using the open descriptor directly
+      const headerBuffer = Buffer.alloc(4096);
+      const { bytesRead: headerBytesRead } = await handle.read(headerBuffer, 0, 4096, 0);
+      for (let i = 0; i < headerBytesRead; i++) {
+        if (headerBuffer[i] === 0) {
+          return { success: false, error: `Cannot read binary file '${filePathArg}' as text.` };
+        }
       }
 
-      // Read file contents as UTF-8
-      const rawContent = await fs.readFile(resolved, 'utf-8');
+      // 6. Read content directly through the verified descriptor
+      const fileSize = stat.size;
+      const contentBuffer = Buffer.alloc(fileSize);
+      await handle.read(contentBuffer, 0, fileSize, 0);
+      const rawContent = contentBuffer.toString('utf-8');
+
       const lines = rawContent.split(/\r?\n/);
       const totalLines = lines.length;
 
@@ -116,6 +146,14 @@ export class ReadFileTool extends Tool {
         return { success: false, error: `Security Exception: ${err.message}` };
       }
       return { success: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // File descriptor closed
+        }
+      }
     }
   }
 }

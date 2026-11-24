@@ -1,9 +1,10 @@
 /**
  * Builtin Tool: list_files
  * Lists files and directories inside a specified workspace directory with metadata.
+ * Hardened against directory symlink cycles and recursive traversal loops.
  */
 
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
 import { Tool } from '../Tool.js';
 import type { ToolPermission, ToolResult, ToolExecutionContext } from '../../types/index.js';
@@ -65,7 +66,7 @@ export class ListFilesTool extends Tool {
       // Verify directory exists
       let dirStat;
       try {
-        dirStat = await fs.stat(resolvedDir);
+        dirStat = await fs.promises.stat(resolvedDir);
       } catch (err: unknown) {
         if ((err as { code?: string }).code === 'ENOENT') {
           return { success: false, error: `Directory not found: '${relPathArg}'` };
@@ -81,6 +82,9 @@ export class ListFilesTool extends Tool {
       const MAX_ENTRIES = 500;
       let truncated = false;
 
+      // Track visited canonical directory paths to eliminate cyclic symlinks and DAG loops
+      const visitedDirs = new Set<string>();
+
       const scan = async (currentDir: string, currentDepth: number): Promise<void> => {
         if (entries.length >= MAX_ENTRIES) {
           truncated = true;
@@ -91,11 +95,22 @@ export class ListFilesTool extends Tool {
           return;
         }
 
+        let canonicalDir: string;
+        try {
+          canonicalDir = fs.realpathSync(currentDir);
+        } catch {
+          return;
+        }
+
+        if (visitedDirs.has(canonicalDir)) {
+          return; // Skip already traversed canonical directory (cycle protection)
+        }
+        visitedDirs.add(canonicalDir);
+
         let dirEntries;
         try {
-          dirEntries = await fs.readdir(currentDir, { withFileTypes: true });
-        } catch (err: unknown) {
-          // If permission denied or inaccessible, skip quietly
+          dirEntries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+        } catch {
           return;
         }
 
@@ -141,7 +156,7 @@ export class ListFilesTool extends Tool {
           let modifiedTime: string | undefined;
 
           try {
-            const stat = await fs.stat(fullPath);
+            const stat = await fs.promises.stat(fullPath);
             if (!entry.isDirectory()) {
               size = stat.size;
             }

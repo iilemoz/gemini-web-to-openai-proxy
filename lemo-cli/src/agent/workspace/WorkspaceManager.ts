@@ -133,36 +133,63 @@ export class WorkspaceManager {
 
   /**
    * Checks whether a file path points to a sensitive environment or secret file.
+   * Performs case-insensitive matching across basename and normalized relative path.
    */
   public isSensitive(filePath: string): boolean {
     const base = path.basename(filePath).toLowerCase();
+    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
 
-    // Environment files
+    // 1. Environment files (.env, .env.local, .env.production, etc.)
     if (base === '.env' || base.startsWith('.env.')) {
       return true;
     }
 
-    // Private SSH / SSL keys
-    if (/^id_(rsa|ed25519|ecdsa|dsa)(\.pub)?$/i.test(base)) {
-      return true;
-    }
-    if (/\.(pem|key|pkcs12|pfx|kdbx)$/i.test(base)) {
-      return true;
-    }
-
-    // Secrets / credentials configs
-    if (/^(credentials|client_secret.*|token|secrets?|passwords?)\.json$/i.test(base)) {
+    // 2. Private SSH keys (id_rsa, id_ed25519, id_ecdsa, id_ecdsa_sk, id_ed25519_sk, id_dsa, etc.)
+    // Explicitly allow public keys (*.pub)
+    if (/^id_[a-z0-9_-]+$/i.test(base)) {
       return true;
     }
 
-    // Package manager secret configurations
-    if (base === '.npmrc' || base === '.netrc' || base === '.htpasswd') {
+    // 3. Certificates, private keys & password databases (.pem, .key, .pkcs12, .pfx, .p12, .kdbx, .keystore, .jks)
+    if (/\.(pem|key|pkcs12|pfx|p12|kdbx|keystore|jks)$/i.test(base)) {
       return true;
     }
 
-    // Git internal credential / configuration files
-    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
-    if (normalized.includes('/.git/config') || normalized.includes('/.git/credentials')) {
+    // 4. Secret / credential configuration files
+    if (/^(credentials|client_secret.*|token|secrets?|passwords?)\.(json|ya?ml|ini)$/i.test(base)) {
+      return true;
+    }
+
+    // 5. Package manager, tool, and shell secret files
+    if (
+      base === '.npmrc' ||
+      base === '.netrc' ||
+      base === '.pypirc' ||
+      base === '.htpasswd' ||
+      base === '.pgpass' ||
+      base === 'master.key' ||
+      base === '.bash_history' ||
+      base === '.zsh_history'
+    ) {
+      return true;
+    }
+
+    // 6. Docker Compose secret overrides (e.g. docker-compose.override.yml, compose.override.yaml)
+    // Note: Standard docker-compose.yml / compose.yaml are NOT blocked
+    if (/^(docker-compose|compose)\.override\.(ya?ml)$/i.test(base)) {
+      return true;
+    }
+
+    // 7. Cloud, VCS, and system credential stores
+    if (
+      normalized.includes('/.aws/credentials') ||
+      normalized.includes('/.aws/config') ||
+      normalized.endsWith('.aws/credentials') ||
+      normalized.endsWith('.aws/config') ||
+      normalized.includes('/.git/config') ||
+      normalized.includes('/.git/credentials') ||
+      normalized.includes('/.git-credentials')
+    ) {
       return true;
     }
 
@@ -182,11 +209,11 @@ export class WorkspaceManager {
    * Detects whether a file contains binary content by inspecting its initial byte header.
    */
   public async isBinary(filePath: string): Promise<boolean> {
+    let handle: fs.promises.FileHandle | null = null;
     try {
-      const handle = await fs.promises.open(filePath, 'r');
+      handle = await fs.promises.open(filePath, 'r');
       const buffer = Buffer.alloc(4096);
       const { bytesRead } = await handle.read(buffer, 0, 4096, 0);
-      await handle.close();
 
       for (let i = 0; i < bytesRead; i++) {
         if (buffer[i] === 0) {
@@ -196,6 +223,14 @@ export class WorkspaceManager {
       return false;
     } catch {
       return false;
+    } finally {
+      if (handle) {
+        try {
+          await handle.close();
+        } catch {
+          // Ignore close error
+        }
+      }
     }
   }
 

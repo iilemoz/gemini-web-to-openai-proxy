@@ -1,20 +1,24 @@
 /**
  * Builtin Tool: search_files
  * Searches for text or regular expression patterns across files within the workspace.
+ * Hardened against ReDoS (catastrophic backtracking), cyclic symlink loops, and TOCTOU races.
  */
 
-import fs from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
 import { Tool } from '../Tool.js';
 import type { ToolPermission, ToolResult, ToolExecutionContext } from '../../types/index.js';
 import { WorkspaceManager } from '../../workspace/WorkspaceManager.js';
 import { SecurityError } from '../../../core/errors/index.js';
+import { SafeRegexMatcher } from './SafeRegexMatcher.js';
 
 export interface SearchMatch {
   file: string;
   line: number;
   content: string;
 }
+
+const MAX_QUERY_LENGTH = 500;
 
 export class SearchFilesTool extends Tool {
   public readonly name = 'search_files';
@@ -26,7 +30,7 @@ export class SearchFilesTool extends Tool {
     properties: {
       query: {
         type: 'string',
-        description: 'Text pattern or regular expression to search for'
+        description: 'Text pattern or regular expression to search for (max 500 characters)'
       },
       path: {
         type: 'string',
@@ -63,6 +67,10 @@ export class SearchFilesTool extends Tool {
       return { success: false, error: 'Search query cannot be empty' };
     }
 
+    if (query.length > MAX_QUERY_LENGTH) {
+      return { success: false, error: `Search query length (${query.length}) exceeds maximum allowed limit of ${MAX_QUERY_LENGTH} characters` };
+    }
+
     const relPath = typeof args['path'] === 'string' ? args['path'] : '.';
     const isRegex = Boolean(args['is_regex']);
     const caseSensitive = Boolean(args['case_sensitive']);
@@ -71,17 +79,17 @@ export class SearchFilesTool extends Tool {
       ? Math.min(Math.floor(args['max_results']), 200)
       : 50;
 
-    let regex: RegExp;
-    try {
-      if (isRegex) {
-        regex = new RegExp(query, caseSensitive ? 'g' : 'gi');
-      } else {
-        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+    // Validate regex syntax upfront if regex mode is requested
+    const regexFlags = caseSensitive ? '' : 'i';
+    if (isRegex) {
+      try {
+        new RegExp(query, regexFlags);
+      } catch (err: unknown) {
+        return { success: false, error: `Invalid regular expression query: ${err instanceof Error ? err.message : String(err)}` };
       }
-    } catch (err: unknown) {
-      return { success: false, error: `Invalid regular expression query: ${err instanceof Error ? err.message : String(err)}` };
     }
+
+    const matcher = isRegex ? new SafeRegexMatcher({ timeoutMs: 1500 }) : null;
 
     try {
       const searchRoot = ws.resolvePath(relPath);
@@ -89,6 +97,11 @@ export class SearchFilesTool extends Tool {
       let truncated = false;
       const MAX_FILES_SCANNED = 500;
       let filesScanned = 0;
+
+      // Track visited canonical directory paths to eliminate cyclic symlink loops
+      const visitedDirs = new Set<string>();
+
+      const openFlags = fs.constants.O_RDONLY | (process.platform !== 'win32' ? (fs.constants.O_NOFOLLOW ?? 0) : 0);
 
       const scanDirectory = async (currentDir: string): Promise<void> => {
         if (matches.length >= maxResults || filesScanned >= MAX_FILES_SCANNED) {
@@ -100,9 +113,22 @@ export class SearchFilesTool extends Tool {
           return;
         }
 
+        let canonicalDir: string;
+        try {
+          canonicalDir = fs.realpathSync(currentDir);
+        } catch {
+          return; // Skip unresolvable directory
+        }
+
+        // Prevent infinite loops across cyclic or duplicate directory symlinks
+        if (visitedDirs.has(canonicalDir)) {
+          return;
+        }
+        visitedDirs.add(canonicalDir);
+
         let entries;
         try {
-          entries = await fs.readdir(currentDir, { withFileTypes: true });
+          entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
         } catch {
           return;
         }
@@ -136,33 +162,82 @@ export class SearchFilesTool extends Tool {
 
             filesScanned++;
 
-            // Skip binary files
-            if (await ws.isBinary(fullPath)) {
-              continue;
-            }
-
+            let fileHandle: fs.promises.FileHandle | null = null;
             try {
-              const content = await fs.readFile(fullPath, 'utf-8');
-              const lines = content.split(/\r?\n/);
+              fileHandle = await fs.promises.open(fullPath, openFlags);
+              const stat = await fileHandle.stat();
+              if (!stat.isFile()) continue;
 
-              for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-                if (matches.length >= maxResults) {
-                  truncated = true;
+              // Check binary via header bytes
+              const header = Buffer.alloc(4096);
+              const { bytesRead: hBytes } = await fileHandle.read(header, 0, 4096, 0);
+              let isBin = false;
+              for (let i = 0; i < hBytes; i++) {
+                if (header[i] === 0) {
+                  isBin = true;
                   break;
                 }
+              }
+              if (isBin) continue;
 
-                const lineText = lines[lineIdx] ?? '';
-                regex.lastIndex = 0;
-                if (regex.test(lineText)) {
+              // Read file content
+              const contentBuf = Buffer.alloc(stat.size);
+              await fileHandle.read(contentBuf, 0, stat.size, 0);
+              const content = contentBuf.toString('utf-8');
+              const lines = content.split(/\r?\n/);
+
+              if (matcher) {
+                // Regex search executed in isolated worker thread with ReDoS timeout
+                const matchedLineIndices = await matcher.matchLines(lines, query, regexFlags);
+                for (const lineIdx of matchedLineIndices) {
+                  if (matches.length >= maxResults) {
+                    truncated = true;
+                    break;
+                  }
+                  const lineText = lines[lineIdx] ?? '';
                   matches.push({
                     file: ws.toRelative(fullPath),
                     line: lineIdx + 1,
                     content: lineText.trim().slice(0, 300)
                   });
                 }
+              } else {
+                // Literal string search (linear time complexity, immune to ReDoS)
+                const targetQuery = caseSensitive ? query : query.toLowerCase();
+                for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+                  if (matches.length >= maxResults) {
+                    truncated = true;
+                    break;
+                  }
+                  const lineText = lines[lineIdx] ?? '';
+                  const hasMatch = caseSensitive
+                    ? lineText.includes(targetQuery)
+                    : lineText.toLowerCase().includes(targetQuery);
+
+                  if (hasMatch) {
+                    matches.push({
+                      file: ws.toRelative(fullPath),
+                      line: lineIdx + 1,
+                      content: lineText.trim().slice(0, 300)
+                    });
+                  }
+                }
               }
-            } catch {
-              // Ignore read errors on inaccessible files
+            } catch (err: unknown) {
+              // ReDoS timeout or security error must bubble up
+              const msg = err instanceof Error ? err.message : String(err);
+              if (msg.includes('ReDoS') || msg.includes('timed out')) {
+                throw err;
+              }
+              // Ignore other non-fatal read errors
+            } finally {
+              if (fileHandle) {
+                try {
+                  await fileHandle.close();
+                } catch {
+                  // File descriptor closed
+                }
+              }
             }
           }
         }
@@ -184,6 +259,10 @@ export class SearchFilesTool extends Tool {
         return { success: false, error: `Security Exception: ${err.message}` };
       }
       return { success: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      if (matcher) {
+        await matcher.terminate();
+      }
     }
   }
 }
