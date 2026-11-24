@@ -131,7 +131,8 @@ v1Router.delete('/runtime/cloud/sandboxes/:id', async (req, res) => {
 });
 
 // ── Agent Orchestrator API ──────────────────────────────────────────────────
-v1Router.get('/agents', (req, res) => {
+v1Router.get('/agents', async (req, res) => {
+  const { AgentRoles } = await import('../agent/index.js').catch(() => ({}));
   res.json({
     object: 'list',
     data: [
@@ -142,6 +143,16 @@ v1Router.get('/agents', (req, res) => {
       { id: 'tester', name: 'Quality Assurance Tester', description: 'Unit testing, integration testing, and test automation' }
     ]
   });
+});
+
+v1Router.post('/agent/pipeline', async (req, res) => {
+  const { multiAgentCoordinator } = await import('../agent/index.js');
+  try {
+    const result = await multiAgentCoordinator.runPipeline(req.body || {});
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 v1Router.get('/agent/runs', async (req, res) => {

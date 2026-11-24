@@ -8,3 +8,4 @@ export * from './AgentPlanner.js';
 export * from './AgentExecutor.js';
 export * from './AgentLoop.js';
 export * from './AgentOrchestrator.js';
+export * from './MultiAgentCoordinator.js';
