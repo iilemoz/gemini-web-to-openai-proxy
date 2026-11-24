@@ -56,8 +56,19 @@ export async function handleChatCompletion(req, res) {
     stream         = false,
     tools          = [],
     tool_choice,
-    stream_options = {}
+    stream_options = {},
+    functions,
+    function_call
   } = req.body;
+
+  // Normalize legacy OpenAI functions parameter into tools format if provided
+  let effectiveTools = Array.isArray(tools) && tools.length > 0 ? tools : [];
+  if (effectiveTools.length === 0 && Array.isArray(functions) && functions.length > 0) {
+    effectiveTools = functions.map(fn => ({
+      type: 'function',
+      function: fn
+    }));
+  }
 
   // ── Basic validation ───────────────────────────────────────────────────────
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -90,7 +101,7 @@ export async function handleChatCompletion(req, res) {
 
   // ── Feature flags ──────────────────────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
-  const hasTools      = Array.isArray(tools) && tools.length > 0;
+  const hasTools      = effectiveTools.length > 0;
 
   const completionId  = `chatcmpl-${crypto.randomUUID()}`;
   const provider      = registry.getProviderForModel(model);
@@ -98,7 +109,7 @@ export async function handleChatCompletion(req, res) {
 
   logger.info(
     `Incoming completion | Model: ${model} | Stream: ${stream} | ` +
-    `Tools: ${hasTools ? tools.length : 0} | Usage: ${includeUsage} | Provider: ${provider.name}`
+    `Tools: ${hasTools ? effectiveTools.length : 0} | Usage: ${includeUsage} | Provider: ${provider.name}`
   );
 
   try {
@@ -107,7 +118,7 @@ export async function handleChatCompletion(req, res) {
       messages,
       stream,
       token,
-      tools,
+      tools: effectiveTools,
       tool_choice,
       signal
     });
@@ -274,7 +285,8 @@ export async function handleChatCompletion(req, res) {
       res.json(formatFullResponse(completionId, model, {
         content,
         reasoning_content: fullReasoning || null,
-        tool_calls:        toolCalls
+        tool_calls:        toolCalls,
+        promptTokens
       }));
 
       logger.success(

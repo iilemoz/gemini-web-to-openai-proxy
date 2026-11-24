@@ -102,7 +102,7 @@ export function formatSSEDone() {
  * @param {Array|null}    opts.tool_calls
  * @returns {Object} Full OpenAI ChatCompletion JSON object.
  */
-export function formatFullResponse(id, model, { content = '', reasoning_content = null, tool_calls = null } = {}) {
+export function formatFullResponse(id, model, { content = '', reasoning_content = null, tool_calls = null, promptTokens = null } = {}) {
   const hasTools = Array.isArray(tool_calls) && tool_calls.length > 0;
 
   const message = {
@@ -118,8 +118,8 @@ export function formatFullResponse(id, model, { content = '', reasoning_content 
     message.tool_calls = tool_calls;
   }
 
-  const promptChars     = 0; // not tracked in non-streaming path; use content length as proxy
-  const completionChars = (content || '').length + (reasoning_content || '').length;
+  const promptTokenCount     = typeof promptTokens === 'number' ? promptTokens : (estimateTokens(content) || 10);
+  const completionTokenCount = estimateTokens(reasoning_content || '') + estimateTokens(content || '');
 
   return {
     id,
@@ -134,9 +134,9 @@ export function formatFullResponse(id, model, { content = '', reasoning_content 
       }
     ],
     usage: {
-      prompt_tokens:      estimateTokens(content) || 10,
-      completion_tokens:  estimateTokens(reasoning_content || '') + estimateTokens(content),
-      total_tokens:       Math.ceil(completionChars / 2) || 20
+      prompt_tokens:      promptTokenCount,
+      completion_tokens:  completionTokenCount,
+      total_tokens:       promptTokenCount + completionTokenCount
     }
   };
 }

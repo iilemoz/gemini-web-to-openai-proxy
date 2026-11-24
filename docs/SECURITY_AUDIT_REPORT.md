@@ -114,6 +114,12 @@ A dedicated security attack suite (`tests/security_attacks.test.mjs`) was execut
 - **Architecture Note**: The Universal AI Agent Infrastructure implements streaming telemetry and completions using standard HTTP Server-Sent Events (SSE) and HTTP REST endpoints. No standalone WebSocket server is mounted or exposed, rendering WebSocket injection vectors **NOT APPLICABLE**.
 - **Status**: **VERIFIED / NOT APPLICABLE**.
 
+### 3.10 Subprocess Pipe Deadlock & IPC Resource Starvation
+- **Threat Vector**: Flooding the API server with logging or rapid requests while spawned as a child process under an orchestrator, causing OS kernel pipe buffer saturation and mutual hanging.
+- **Verification Test**: Executed `tests/subprocess_logging_regression.test.mjs` spawning a child server and firing 15 parallel requests with continuous logging.
+- **Audit Result**: **PASS**. Subprocess cleanly drains output, responds within milliseconds, and shuts down cleanly on SIGTERM/SIGKILL.
+- **Status**: **VERIFIED SECURE**.
+
 ---
 
 ## 4. Security Hardening Recommendations

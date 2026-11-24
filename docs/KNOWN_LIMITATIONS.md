@@ -62,9 +62,21 @@ This document details the verified real-world operational constraints, edge-case
 ### 4.2 In-Memory Run History Eviction
 - **Limitation**: Completed agent runs are tracked in-memory by `AgentOrchestrator` with an LRU capacity cap of 1,000 runs to prevent memory bloat. Persisted facts and artifacts are stored in `PersistentMemory` (`.agent_memory/`), but ephemeral step logs are eventually pruned.
 
+### 4.3 Architectural Scope Boundary: Backend vs. IDE Runtimes
+- **Policy**: The proxy backend strictly provides OpenAI-compatible model inference, streaming, and tool schema normalization.
+- **Limitation**: The proxy backend does NOT act as an IDE or high-level agent coordinator for external clients. External tools (DeepSeek Harness, OpenCode, Cline, Cursor, Continue) maintain their own agent loops, session states, and workspace file operations.
+
 ---
 
-## 5. Summary Table
+## 5. Process & Subprocess Execution on Windows
+
+### 5.1 Subprocess Standard Output/Error Pipe Buffer Limits
+- **Behavior**: On Windows, spawning child processes using `subprocess.PIPE` allocates an OS-level kernel buffer (typically 4KB to 64KB). If the child process generates verbose logging (e.g. detailed HTTP access logs) while the parent process is waiting on network sockets, the child process blocks on `WriteFile` when the buffer fills.
+- **Mitigation**: Automated scripts and test wrappers running on Windows must redirect `stdout` and `stderr` directly to file handles on disk (`open("server.log", "w")`) or continuously drain pipe streams in background threads. Never leave pipes unread during synchronous network requests. This pattern is permanently enforced in `scripts/run_deepseek_harness_task.py` and validated by `tests/subprocess_logging_regression.test.mjs`.
+
+---
+
+## 6. Summary Table
 
 | Category | Constraint | Severity | Verified Mitigation |
 | :--- | :--- | :--- | :--- |
@@ -75,5 +87,7 @@ This document details the verified real-world operational constraints, edge-case
 | **Security** | Process isolation lacks cgroup caps | Medium | Enable Docker isolation for multi-tenant deployments. |
 | **Security** | Symlink / Junction directory escape | High | Defended via `fs.realpathSync` path authorization check. |
 | **OS** | Windows vs POSIX shell syntax | Low | Prefer built-in FS/Search tools over raw shell scripts. |
+| **OS (Windows)** | Subprocess unread pipe deadlock | Medium | Redirect child process output to log files or drain pipes continuously. |
 | **Networking** | Reverse proxy chunk buffering | Low | Ensure `proxy_buffering off` in external ingress. |
 | **Agent** | Max 25 iterations per loop | Low | Decompose large tasks using MultiAgent pipelines. |
+| **Scope** | Platform scope boundary | Info | Backend handles inference/protocols; IDEs manage orchestration. |

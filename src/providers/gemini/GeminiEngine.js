@@ -241,8 +241,8 @@ Instructions for tool calling:
 
     if (validMessages.length === 0) return '';
 
-    const systemMessages  = validMessages.filter(m => m.role === 'system');
-    const conversation    = validMessages.filter(m => m.role !== 'system');
+    const systemMessages  = validMessages.filter(m => m.role === 'system' || m.role === 'developer');
+    const conversation    = validMessages.filter(m => m.role !== 'system' && m.role !== 'developer');
 
     const hasTools        = Array.isArray(tools) && tools.length > 0;
     const baseInstruction = hasTools

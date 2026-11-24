@@ -34,8 +34,9 @@ app.get('/healthz', (req, res) => {
 // Mount Developer Admin Dashboard
 app.use('/dashboard', dashboardRouter);
 
-// Mount OpenAI v1 compatible routes
+// Mount OpenAI v1 compatible routes (at /v1 and root for maximum client compatibility)
 app.use('/v1', v1Router);
+app.use(v1Router);
 
 // Global 404 handler
 app.use((req, res) => {

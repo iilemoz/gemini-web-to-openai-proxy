@@ -86,6 +86,56 @@ export const config = {
       root: 'gemini-lite',
       parent: null,
       description: 'Google Gemini Lite'
+    },
+    {
+      id: 'deepseek-chat',
+      object: 'model',
+      created: 1715500000,
+      owned_by: 'deepseek',
+      permission: [],
+      root: 'deepseek-chat',
+      parent: null,
+      description: 'DeepSeek Chat Compatibility Alias (maps to Gemini 2.5 Flash)'
+    },
+    {
+      id: 'deepseek-reasoner',
+      object: 'model',
+      created: 1715500000,
+      owned_by: 'deepseek',
+      permission: [],
+      root: 'deepseek-reasoner',
+      parent: null,
+      description: 'DeepSeek Reasoner Compatibility Alias (maps to Gemini Thinking)'
+    },
+    {
+      id: 'deepseek-coder',
+      object: 'model',
+      created: 1715500000,
+      owned_by: 'deepseek',
+      permission: [],
+      root: 'deepseek-coder',
+      parent: null,
+      description: 'DeepSeek Coder Compatibility Alias (maps to Gemini 2.5 Flash)'
+    },
+    {
+      id: 'gpt-4o',
+      object: 'model',
+      created: 1715500000,
+      owned_by: 'openai',
+      permission: [],
+      root: 'gpt-4o',
+      parent: null,
+      description: 'GPT-4o Compatibility Alias (maps to Gemini 2.5 Flash)'
+    },
+    {
+      id: 'gpt-4',
+      object: 'model',
+      created: 1715500000,
+      owned_by: 'openai',
+      permission: [],
+      root: 'gpt-4',
+      parent: null,
+      description: 'GPT-4 Compatibility Alias (maps to Gemini 2.5 Flash)'
     }
   ]
 };
