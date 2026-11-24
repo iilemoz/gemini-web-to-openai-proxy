@@ -150,7 +150,7 @@ export class DeleteFileTool extends Tool {
           operationType: 'delete',
           workspaceIdentity: this.workspaceManager.getIdentity(),
           canonicalPath: canonicalTarget,
-          originalContentHash
+          ...(originalContentHash ? { originalContentHash } : {})
         });
       }
 

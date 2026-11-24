@@ -202,7 +202,7 @@ export class MoveFileTool extends Tool {
           workspaceIdentity: this.workspaceManager.getIdentity(),
           canonicalPath: canonicalSource,
           destinationCanonicalPath: canonicalDest,
-          originalContentHash
+          ...(originalContentHash ? { originalContentHash } : {})
         });
       }
 

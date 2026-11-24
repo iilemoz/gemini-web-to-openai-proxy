@@ -44,6 +44,7 @@ export interface ExpectedValidation {
   destinationCanonicalPath?: string | undefined;
   originalContentHash?: string | undefined;
   proposedContentHash?: string | undefined;
+  commandStringHash?: string | undefined;
 }
 
 interface StoredApproval {
@@ -218,7 +219,12 @@ export class ApprovalManager {
       );
     }
 
-    if (expected.destinationCanonicalPath) {
+    const hasDestinationInRecord =
+      stored.record.targetPaths.length > 1 || stored.record.operationType === 'move';
+    if (hasDestinationInRecord) {
+      if (!expected.destinationCanonicalPath || typeof expected.destinationCanonicalPath !== 'string') {
+        throw new SecurityError('Execution denied: missing required destinationCanonicalPath in validation request');
+      }
       const destMatched = stored.record.targetPaths.some(
         (p) => p.canonicalPath === expected.destinationCanonicalPath
       );
@@ -227,24 +233,62 @@ export class ApprovalManager {
           `Execution denied: destination path '${expected.destinationCanonicalPath}' not found in approved target paths`
         );
       }
+    } else if (expected.destinationCanonicalPath) {
+      throw new SecurityError('Execution denied: unexpected destinationCanonicalPath provided for single-target approval');
     }
 
-    // 9. Original content fingerprint validation (for modify operations)
-    if (expected.originalContentHash) {
+    // 9. Original content fingerprint validation
+    if (stored.record.payloadDigest.originalContentHash) {
+      if (!expected.originalContentHash || typeof expected.originalContentHash !== 'string') {
+        throw new SecurityError(
+          'Execution denied: missing required originalContentHash fingerprint in validation request'
+        );
+      }
       if (stored.record.payloadDigest.originalContentHash !== expected.originalContentHash) {
         throw new SecurityError(
           'Execution denied: approved original content digest does not match current target file fingerprint'
         );
       }
+    } else if (expected.originalContentHash) {
+      throw new SecurityError(
+        'Execution denied: unexpected originalContentHash provided for approval record without original content hash'
+      );
     }
 
     // 10. Proposed content fingerprint validation
-    if (expected.proposedContentHash) {
+    if (stored.record.payloadDigest.proposedContentHash) {
+      if (!expected.proposedContentHash || typeof expected.proposedContentHash !== 'string') {
+        throw new SecurityError(
+          'Execution denied: missing required proposedContentHash fingerprint in validation request'
+        );
+      }
       if (stored.record.payloadDigest.proposedContentHash !== expected.proposedContentHash) {
         throw new SecurityError(
           'Execution denied: proposed content digest does not match approved digest'
         );
       }
+    } else if (expected.proposedContentHash) {
+      throw new SecurityError(
+        'Execution denied: unexpected proposedContentHash provided for approval record without proposed content hash'
+      );
+    }
+
+    // 11. Command string fingerprint validation
+    if (stored.record.payloadDigest.commandStringHash) {
+      if (!expected.commandStringHash || typeof expected.commandStringHash !== 'string') {
+        throw new SecurityError(
+          'Execution denied: missing required commandStringHash fingerprint in validation request'
+        );
+      }
+      if (stored.record.payloadDigest.commandStringHash !== expected.commandStringHash) {
+        throw new SecurityError(
+          'Execution denied: command string digest does not match approved digest'
+        );
+      }
+    } else if (expected.commandStringHash) {
+      throw new SecurityError(
+        'Execution denied: unexpected commandStringHash provided for approval record without command hash'
+      );
     }
 
     return stored.record;

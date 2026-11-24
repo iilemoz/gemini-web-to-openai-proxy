@@ -234,8 +234,25 @@ export class WorkspaceManager {
    * Performs case-insensitive matching across basename and normalized relative path.
    */
   public isSensitive(filePath: string): boolean {
-    const base = path.basename(filePath).toLowerCase();
-    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+    const normalized = path.normalize(filePath).replace(/\\/g, '/').toLowerCase();
+    const base = path.basename(normalized);
+    const segments = normalized.split('/').filter(Boolean);
+    const cleanSegments = segments.map((s) => s.replace(/[. ]+$/g, ''));
+
+    // 0. Git metadata directory roots, submodule configurations, and nested paths
+    // Protects .git directory roots, .gitmodules, .git-credentials, .gitconfig, and all files inside any .git directory
+    if (
+      cleanSegments.includes('.git') ||
+      cleanSegments.includes('.gitmodules') ||
+      cleanSegments.includes('.git-credentials') ||
+      cleanSegments.includes('.gitconfig') ||
+      base === '.git' ||
+      base === '.gitmodules' ||
+      base === '.git-credentials' ||
+      base === '.gitconfig'
+    ) {
+      return true;
+    }
 
     // 1. Environment files (.env, .env.local, .env.production, etc.)
     if (base === '.env' || base.startsWith('.env.')) {
@@ -283,10 +300,7 @@ export class WorkspaceManager {
       normalized.includes('/.aws/credentials') ||
       normalized.includes('/.aws/config') ||
       normalized.endsWith('.aws/credentials') ||
-      normalized.endsWith('.aws/config') ||
-      normalized.includes('/.git/config') ||
-      normalized.includes('/.git/credentials') ||
-      normalized.includes('/.git-credentials')
+      normalized.endsWith('.aws/config')
     ) {
       return true;
     }
@@ -695,6 +709,29 @@ export class WorkspaceManager {
         throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Cannot overwrite with directory.`);
       }
 
+      // Revalidate destination non-existence immediately before rename to catch destination races
+      let preRenameDestExists = false;
+      try {
+        await fs.promises.lstat(canonicalDest);
+        preRenameDestExists = true;
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'ENOENT') throw err;
+      }
+      if (preRenameDestExists) {
+        throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Cannot overwrite with directory.`);
+      }
+
+      // Revalidate source directory identity before rename
+      const currentSourceStat = await fs.promises.lstat(canonicalSource);
+      if (
+        !currentSourceStat.isDirectory() ||
+        Number(currentSourceStat.ino) !== Number(sourceStat.ino) ||
+        Number(currentSourceStat.dev) !== Number(sourceStat.dev)
+      ) {
+        throw new SecurityError('Source directory identity changed prior to rename');
+      }
+
       await fs.promises.rename(canonicalSource, canonicalDest);
       return { type: 'directory' };
     }
@@ -711,6 +748,15 @@ export class WorkspaceManager {
         if (destStat?.isSymbolicLink()) {
           throw new SecurityError(`Refusing to overwrite symlink destination: '${this.toRelative(canonicalDest)}'`);
         }
+        // Revalidate source identity before atomic overwrite rename
+        const currentSourceStat = await fs.promises.lstat(canonicalSource);
+        if (
+          !currentSourceStat.isFile() ||
+          Number(currentSourceStat.ino) !== Number(sourceStat.ino) ||
+          Number(currentSourceStat.dev) !== Number(sourceStat.dev)
+        ) {
+          throw new SecurityError('Source file identity changed prior to overwrite rename');
+        }
         // Overwrite via atomic rename
         await fs.promises.rename(canonicalSource, canonicalDest);
         return { type: 'file', bytesMoved: sourceStat.size };
@@ -720,6 +766,15 @@ export class WorkspaceManager {
         if (options?.overwrite !== true) {
           try {
             await fs.promises.link(canonicalSource, canonicalDest);
+            // Source identity validation immediately before unlinking
+            const preUnlinkStat = await fs.promises.lstat(canonicalSource);
+            if (
+              !preUnlinkStat.isFile() ||
+              Number(preUnlinkStat.ino) !== Number(sourceStat.ino) ||
+              Number(preUnlinkStat.dev) !== Number(sourceStat.dev)
+            ) {
+              throw new SecurityError('Source file identity changed prior to unlinking in move operation');
+            }
             await fs.promises.unlink(canonicalSource);
             return { type: 'file', bytesMoved: sourceStat.size };
           } catch (linkErr: unknown) {
