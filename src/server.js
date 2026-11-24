@@ -2,6 +2,7 @@ import http from 'node:http';
 import { app } from './app.js';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
+import { requestTracker } from './utils/requestTracker.js';
 
 const banner = `
 ===========================================================
@@ -15,17 +16,53 @@ const banner = `
 ===========================================================
 `;
 
-const server = http.createServer(app);
+export const server = http.createServer(app);
 
-server.listen(config.port, () => {
-  console.log(banner);
-  logger.success(`Server listening on port ${config.port} (IPv4 & IPv6 dual-stack)`);
-});
+// Programmatic graceful shutdown function for production and automated testing
+export async function gracefulShutdown(serverInstance = server, gracePeriodMs = config.shutdownGracePeriodMs) {
+  if (requestTracker.isShuttingDown) return;
+  logger.info(`Starting graceful shutdown (grace period: ${gracePeriodMs}ms)...`);
+  requestTracker.startShutdown();
 
-process.on('SIGINT', () => {
-  logger.info('Shutting down server...');
-  server.close(() => {
-    logger.info('Server closed. Goodbye!');
-    process.exit(0);
+  if (serverInstance && serverInstance.close) {
+    serverInstance.close(() => {
+      logger.info('HTTP server closed to new connections.');
+    });
+  }
+
+  const startTime = Date.now();
+  while (requestTracker.getActiveCount() > 0 && (Date.now() - startTime) < gracePeriodMs) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+
+  if (requestTracker.getActiveCount() > 0) {
+    logger.warn(`Grace period expired with ${requestTracker.getActiveCount()} active requests. Aborting all remaining requests.`);
+    requestTracker.abortAll('Shutdown grace period expired');
+  } else {
+    logger.info('All in-flight requests completed cleanly.');
+  }
+
+  return true;
+}
+
+// Only start listening if executed directly as entrypoint (not when imported in test suites)
+const isDirectRun = Boolean(
+  process.argv[1] &&
+  (process.argv[1].endsWith('server.js') || process.argv[1].endsWith('server'))
+);
+
+if (isDirectRun && process.env.NODE_ENV !== 'test') {
+  server.listen(config.port, () => {
+    console.log(banner);
+    logger.success(`Server listening on port ${config.port} (IPv4 & IPv6 dual-stack)`);
   });
-});
+
+  const handleTermination = async (signal) => {
+    logger.info(`Received ${signal}. Initiating graceful shutdown...`);
+    await gracefulShutdown(server, config.shutdownGracePeriodMs);
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => handleTermination('SIGINT'));
+  process.on('SIGTERM', () => handleTermination('SIGTERM'));
+}

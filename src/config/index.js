@@ -15,6 +15,16 @@ export const config = {
   corsOrigin: process.env.CORS_ORIGIN || '*',
   upstreamProxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.PROXY || '',
 
+  // Reliability, Timeout, and Lifecycle Configurations
+  connectionTimeoutMs: parseInt(process.env.UPSTREAM_CONNECT_TIMEOUT_MS || '15000', 10),
+  requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '120000', 10),
+  streamingIdleTimeoutMs: parseInt(process.env.STREAMING_IDLE_TIMEOUT_MS || '60000', 10),
+  shutdownGracePeriodMs: parseInt(process.env.SHUTDOWN_GRACE_PERIOD_MS || '15000', 10),
+  retryMaxAttempts: parseInt(process.env.RETRY_MAX_ATTEMPTS || '3', 10),
+  retryInitialDelayMs: parseInt(process.env.RETRY_INITIAL_DELAY_MS || '500', 10),
+  retryMaxDelayMs: parseInt(process.env.RETRY_MAX_DELAY_MS || '8000', 10),
+  retryJitter: process.env.RETRY_JITTER !== 'false',
+
   // Available model aliases mapped to Google Gemini backend
   models: [
     {

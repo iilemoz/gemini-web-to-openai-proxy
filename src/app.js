@@ -4,8 +4,23 @@ import { v1Router } from './routes/v1.js';
 import { dashboardRouter } from './dashboard/dashboardRouter.js';
 import { logger } from './utils/logger.js';
 import { config } from './config/index.js';
+import { requestTracker } from './utils/requestTracker.js';
 
 export const app = express();
+
+// Reject new incoming requests during graceful shutdown
+app.use((req, res, next) => {
+  if (requestTracker.isShuttingDown) {
+    return res.status(503).json({
+      error: {
+        message: 'Server is shutting down and cannot accept new requests.',
+        type: 'service_unavailable',
+        code: 'server_shutting_down'
+      }
+    });
+  }
+  next();
+});
 
 // Middlewares
 app.use(cors({ origin: config.corsOrigin }));

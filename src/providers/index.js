@@ -30,6 +30,11 @@ class ProviderRegistry {
    * @returns {import('./BaseProvider.js').BaseProvider}
    */
   getProviderForModel(modelId) {
+    for (const provider of this.providers.values()) {
+      if (provider.name !== 'gemini' && typeof provider.supportsModel === 'function' && provider.supportsModel(modelId)) {
+        return provider;
+      }
+    }
     return this.defaultProvider;
   }
 }

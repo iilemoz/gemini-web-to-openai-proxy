@@ -10,6 +10,8 @@ import { parseDSML } from '../utils/dsmlParser.js';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
+import { requestTracker } from '../utils/requestTracker.js';
+import { executeWithRetry } from '../utils/retry.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,17 +86,33 @@ export async function handleChatCompletion(req, res) {
   // ── Auth: extract Gemini cookie from request (separated from proxy API auth) ────────
   const token = req.geminiCookie || null;
 
-  // ── Abort controller for client disconnect handling ────────────────────────
+  // ── Request tracking and abort controller ──────────────────────────────────
+  const completionId  = `chatcmpl-${crypto.randomUUID()}`;
   const abortController = new AbortController();
   const { signal } = abortController;
 
-  // Listen on `res` (not `req`) for disconnect detection.
-  // `req.on('close')` fires when the *request body* is consumed (too early).
-  // `res.on('close')` fires only when the underlying socket is actually closed
-  // by the client (e.g. user clicks "Stop Generation" in the UI).
+  if (!requestTracker.track(completionId, abortController)) {
+    return res.status(503).json({
+      error: {
+        message: 'Server is shutting down and cannot accept new requests.',
+        type:    'service_unavailable',
+        code:    'server_shutting_down'
+      }
+    });
+  }
+
+  // Request timeout timer
+  let timeoutTimer = null;
+  if (config.requestTimeoutMs > 0) {
+    timeoutTimer = setTimeout(() => {
+      abortController.abort(new Error(`Request timed out after ${config.requestTimeoutMs}ms`));
+    }, config.requestTimeoutMs);
+  }
+
+  // Listen on `res` for disconnect detection.
   res.on('close', () => {
     if (!res.writableEnded) {
-      logger.info('[ChatController] Client disconnected – aborting upstream stream.');
+      logger.info(`[ChatController] Client disconnected – aborting completion ${completionId}.`);
       abortController.abort();
     }
   });
@@ -102,8 +120,6 @@ export async function handleChatCompletion(req, res) {
   // ── Feature flags ──────────────────────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
   const hasTools      = effectiveTools.length > 0;
-
-  const completionId  = `chatcmpl-${crypto.randomUUID()}`;
   const provider      = registry.getProviderForModel(model);
   const promptTokens  = estimatePromptTokens(messages);
 
@@ -112,24 +128,38 @@ export async function handleChatCompletion(req, res) {
     `Tools: ${hasTools ? effectiveTools.length : 0} | Usage: ${includeUsage} | Provider: ${provider.name}`
   );
 
-  try {
-    const generator = provider.chatComplete({
-      model,
-      messages,
-      stream,
-      token,
-      tools: effectiveTools,
-      tool_choice,
-      signal
-    });
+  let hasStartedStreaming = false;
+  let idleTimer = null;
 
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (config.streamingIdleTimeoutMs > 0) {
+      idleTimer = setTimeout(() => {
+        logger.warn(`[ChatController] Streaming idle timeout reached (${config.streamingIdleTimeoutMs}ms without chunk)`);
+        abortController.abort(new Error(`Streaming idle timeout of ${config.streamingIdleTimeoutMs}ms exceeded`));
+      }, config.streamingIdleTimeoutMs);
+    }
+  };
+
+  try {
     // ── STREAMING RESPONSE ─────────────────────────────────────────────────
     if (stream) {
+      const generator = provider.chatComplete({
+        model,
+        messages,
+        stream: true,
+        token,
+        tools: effectiveTools,
+        tool_choice,
+        signal
+      });
+
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders?.();
+      hasStartedStreaming = true;
 
       // Initial role delta (required by OpenAI spec)
       res.write(formatSSEChunk(completionId, model, { role: 'assistant' }));
@@ -143,7 +173,10 @@ export async function handleChatCompletion(req, res) {
       let dsmlBuffer        = '';
       let pendingContent    = '';
 
+      resetIdleTimer();
+
       for await (const rawChunk of generator) {
+        resetIdleTimer();
         // Generator has already stopped if signal was aborted
         if (!rawChunk) continue;
 
@@ -205,6 +238,8 @@ export async function handleChatCompletion(req, res) {
         }
       }
 
+      if (idleTimer) clearTimeout(idleTimer);
+
       // ── Flush any remaining plain-text buffer ──────────────────────────────
       if (pendingContent) {
         res.write(formatSSEChunk(completionId, model, { content: pendingContent }));
@@ -254,49 +289,78 @@ export async function handleChatCompletion(req, res) {
 
     // ── NON-STREAMING RESPONSE ───────────────────────────────────────────────
     } else {
-      let fullContent   = '';
-      let fullReasoning = '';
+      const { content, reasoning_content, toolCalls } = await executeWithRetry(
+        async () => {
+          const generator = provider.chatComplete({
+            model,
+            messages,
+            stream: false,
+            token,
+            tools: effectiveTools,
+            tool_choice,
+            signal
+          });
 
-      for await (const rawChunk of generator) {
-        if (!rawChunk) continue;
-        const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
-        const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
+          let fullContent   = '';
+          let fullReasoning = '';
 
-        if (chunkType === 'thinking') {
-          fullReasoning += chunkText;
-        } else {
-          fullContent += chunkText;
-        }
-      }
+          for await (const rawChunk of generator) {
+            if (signal.aborted) {
+              const abortErr = new Error('Aborted');
+              abortErr.name = 'AbortError';
+              throw abortErr;
+            }
+            if (!rawChunk) continue;
+            const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
+            const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
 
-      const { content, toolCalls } = parseDSML(fullContent);
-
-      if (isUpstreamErrorText(content) && (!toolCalls || toolCalls.length === 0)) {
-        logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${content}"`);
-        return res.status(502).json({
-          error: {
-            message: `Upstream model error: ${content}`,
-            type: 'upstream_error',
-            code: 'model_error'
+            if (chunkType === 'thinking') {
+              fullReasoning += chunkText;
+            } else {
+              fullContent += chunkText;
+            }
           }
-        });
-      }
+
+          const parsed = parseDSML(fullContent);
+
+          if (isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
+            logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
+            const err = new Error(`Upstream model error: ${parsed.content}`);
+            err.status = 502;
+            err.code = 'model_error';
+            throw err;
+          }
+
+          return {
+            content: parsed.content,
+            reasoning_content: fullReasoning || null,
+            toolCalls: parsed.toolCalls
+          };
+        },
+        {
+          maxAttempts: config.retryMaxAttempts,
+          initialDelayMs: config.retryInitialDelayMs,
+          maxDelayMs: config.retryMaxDelayMs,
+          jitter: config.retryJitter,
+          signal
+        }
+      );
 
       res.json(formatFullResponse(completionId, model, {
         content,
-        reasoning_content: fullReasoning || null,
+        reasoning_content,
         tool_calls:        toolCalls,
         promptTokens
       }));
 
       logger.success(
         `Non-stream completed: ${content.length} content chars, ` +
-        `${fullReasoning.length} reasoning chars, ${toolCalls.length} tool calls.`
+        `${(reasoning_content || '').length} reasoning chars, ${toolCalls.length} tool calls.`
       );
     }
 
   } catch (err) {
-    // Ignore abort errors (expected when client disconnects)
+    // Ignore abort errors (expected when client disconnects or request cancelled)
     if (signal.aborted || err.name === 'AbortError') {
       logger.info('[ChatController] Request was aborted cleanly.');
       if (!res.writableEnded) res.end();
@@ -305,17 +369,25 @@ export async function handleChatCompletion(req, res) {
 
     logger.error('Error handling chat completion:', err);
 
-    if (!res.headersSent) {
-      res.status(500).json({
+    if (!res.headersSent && !hasStartedStreaming) {
+      const status = err.status || 500;
+      res.status(status).json({
         error: {
           message: err.message || 'Internal server error while processing completion',
-          type:    'api_error',
-          code:    'internal_error'
+          type:    status === 502 ? 'upstream_error' : 'api_error',
+          code:    err.code || 'internal_error'
         }
       });
     } else {
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
-      res.end();
+      if (!res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ error: { message: err.message, type: 'upstream_error' } })}\n\n`);
+        res.write(formatSSEDone());
+        res.end();
+      }
     }
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    requestTracker.untrack(completionId);
   }
 }

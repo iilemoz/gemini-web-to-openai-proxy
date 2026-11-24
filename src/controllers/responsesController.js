@@ -3,6 +3,8 @@ import { registry } from '../providers/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
+import { requestTracker } from '../utils/requestTracker.js';
+import { executeWithRetry } from '../utils/retry.js';
 
 /**
  * POST /v1/responses
@@ -49,42 +51,82 @@ export async function handleResponses(req, res) {
   const provider = registry.getProviderForModel(model);
   const responseId = `resp-${crypto.randomUUID()}`;
 
-  try {
-    let fullContent = '';
-    const generator = provider.chatComplete({
-      model,
-      messages,
-      stream: false,
-      token,
-      tools
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
+  if (!requestTracker.track(responseId, abortController)) {
+    return res.status(503).json({
+      error: {
+        message: 'Server is shutting down and cannot accept new requests.',
+        type:    'service_unavailable',
+        code:    'server_shutting_down'
+      }
     });
+  }
 
-    for await (const chunk of generator) {
-      if (!chunk) continue;
-      const text = typeof chunk === 'object' ? chunk.text : chunk;
-      fullContent += text;
+  let timeoutTimer = null;
+  if (config.requestTimeoutMs > 0) {
+    timeoutTimer = setTimeout(() => {
+      abortController.abort(new Error(`Request timed out after ${config.requestTimeoutMs}ms`));
+    }, config.requestTimeoutMs);
+  }
+
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      logger.info(`[Responses API] Client disconnected – aborting ${responseId}.`);
+      abortController.abort();
     }
+  });
 
-    if (isUpstreamErrorText(fullContent)) {
-      logger.warn(`[Responses API] Upstream Gemini returned internal error text: "${fullContent}"`);
-      return res.status(502).json({
-        error: {
-          message: `Upstream model error: ${fullContent}`,
-          type: 'upstream_error',
-          code: 'model_error'
+  try {
+    const fullContent = await executeWithRetry(
+      async () => {
+        let content = '';
+        const generator = provider.chatComplete({
+          model,
+          messages,
+          stream: false,
+          token,
+          tools,
+          signal
+        });
+
+        for await (const chunk of generator) {
+          if (signal.aborted) {
+            const abortErr = new Error('Aborted');
+            abortErr.name = 'AbortError';
+            throw abortErr;
+          }
+          if (!chunk) continue;
+          const text = typeof chunk === 'object' ? chunk.text : chunk;
+          content += text;
         }
-      });
-    }
 
-    if (!fullContent || fullContent.trim().length === 0) {
-      return res.status(502).json({
-        error: {
-          message: 'Upstream model returned an empty response.',
-          type: 'upstream_error',
-          code: 'empty_response'
+        if (isUpstreamErrorText(content)) {
+          logger.warn(`[Responses API] Upstream Gemini returned internal error text: "${content}"`);
+          const err = new Error(`Upstream model error: ${content}`);
+          err.status = 502;
+          err.code = 'model_error';
+          throw err;
         }
-      });
-    }
+
+        if (!content || content.trim().length === 0) {
+          const err = new Error('Upstream model returned an empty response.');
+          err.status = 502;
+          err.code = 'empty_response';
+          throw err;
+        }
+
+        return content;
+      },
+      {
+        maxAttempts: config.retryMaxAttempts,
+        initialDelayMs: config.retryInitialDelayMs,
+        maxDelayMs: config.retryMaxDelayMs,
+        jitter: config.retryJitter,
+        signal
+      }
+    );
 
     res.json({
       id: responseId,
@@ -112,13 +154,23 @@ export async function handleResponses(req, res) {
       }
     });
   } catch (err) {
+    if (signal.aborted || err.name === 'AbortError') {
+      logger.info('[Responses API] Request was aborted cleanly.');
+      if (!res.writableEnded) res.end();
+      return;
+    }
+
     logger.error('[Responses API] Error generating response:', err);
-    res.status(500).json({
+    const status = err.status || 500;
+    res.status(status).json({
       error: {
         message: err.message || 'Error processing response',
-        type: 'api_error',
-        code: 'internal_error'
+        type:    status === 502 ? 'upstream_error' : 'api_error',
+        code:    err.code || 'internal_error'
       }
     });
+  } finally {
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    requestTracker.untrack(responseId);
   }
 }
