@@ -48,7 +48,9 @@ export class GeminiEngine {
       }
 
       logger.info('[GeminiEngine] Initializing Account Mode client');
-      const client = new Gemini({ secure_1psid: secure1psid, autoClose: false });
+      const clientOptions = { secure_1psid: secure1psid, autoClose: false };
+      if (config.upstreamProxy) clientOptions.proxy = config.upstreamProxy;
+      const client = new Gemini(clientOptions);
 
       if (secure1psidts) {
         client.cookies['__Secure-1PSIDTS'] = secure1psidts;
@@ -61,8 +63,10 @@ export class GeminiEngine {
     // ── Guest Mode ────────────────────────────────────────────────────────────
     // A fresh client is created per request to prevent session-cookie cross-talk.
     // isTemporary = true signals the caller to close() it when done.
+    const guestOptions = { autoClose: false };
+    if (config.upstreamProxy) guestOptions.proxy = config.upstreamProxy;
     return {
-      client: new Gemini({ autoClose: false }),
+      client: new Gemini(guestOptions),
       isTemporary: true
     };
   }

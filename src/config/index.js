@@ -8,7 +8,13 @@ export const config = {
   geminiSecure1psid: process.env.GEMINI_SECURE_1PSID || '',
   geminiSecure1psidts: process.env.GEMINI_SECURE_1PSIDTS || '',
   proxyApiKey: process.env.PROXY_API_KEY || '',
-  
+  allowCookiePassthrough: process.env.ALLOW_COOKIE_PASSTHROUGH === 'true',
+  rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',
+  rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '120', 10),
+  rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  upstreamProxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.PROXY || '',
+
   // Available model aliases mapped to Google Gemini backend
   models: [
     {
@@ -21,7 +27,6 @@ export const config = {
       parent: null,
       description: 'Google Gemini 2.5 Flash / Gemini 3 Flash (Fast & Pure HTTP)'
     },
-
     {
       id: 'gemini-2.5-flash',
       object: 'model',

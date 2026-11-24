@@ -69,9 +69,8 @@ export async function handleChatCompletion(req, res) {
     });
   }
 
-  // ── Auth: extract bearer token from client (may be a Google cookie) ────────
-  const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+  // ── Auth: extract Gemini cookie from request (separated from proxy API auth) ────────
+  const token = req.geminiCookie || null;
 
   // ── Abort controller for client disconnect handling ────────────────────────
   const abortController = new AbortController();
