@@ -4,6 +4,10 @@ import { terminalManager } from './local/TerminalManager.js';
 import { deviceManager } from './local/DeviceManager.js';
 import { registerLocalTools } from './local/registerLocalTools.js';
 
+import { dockerManager } from './cloud/DockerManager.js';
+import { containerManager } from './cloud/ContainerManager.js';
+import { cloudRuntime } from './cloud/CloudRuntime.js';
+
 class RuntimeSessionManager {
   constructor() {
     this.sessions = new Map();
@@ -43,5 +47,8 @@ export {
   workspaceManager,
   terminalManager,
   deviceManager,
-  registerLocalTools
+  registerLocalTools,
+  dockerManager,
+  containerManager,
+  cloudRuntime
 };

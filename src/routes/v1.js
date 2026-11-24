@@ -83,6 +83,38 @@ v1Router.delete('/runtime/sessions/:id', async (req, res) => {
   res.json({ status: deleted ? 'deleted' : 'not_found' });
 });
 
+// ── Cloud Runtime ────────────────────────────────────────────────────────────
+v1Router.get('/runtime/cloud/status', async (req, res) => {
+  const { cloudRuntime } = await import('../runtime/index.js');
+  res.json(await cloudRuntime.checkStatus());
+});
+
+v1Router.post('/runtime/cloud/sandboxes', async (req, res) => {
+  const { cloudRuntime } = await import('../runtime/index.js');
+  try {
+    const sandbox = await cloudRuntime.createSandbox(req.body);
+    res.status(201).json(sandbox);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+v1Router.post('/runtime/cloud/sandboxes/:id/exec', async (req, res) => {
+  const { cloudRuntime } = await import('../runtime/index.js');
+  try {
+    const result = await cloudRuntime.execute(req.params.id, req.body?.command, req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: { message: err.message } });
+  }
+});
+
+v1Router.delete('/runtime/cloud/sandboxes/:id', async (req, res) => {
+  const { cloudRuntime } = await import('../runtime/index.js');
+  const destroyed = await cloudRuntime.destroy(req.params.id);
+  res.json({ status: destroyed ? 'destroyed' : 'not_found' });
+});
+
 // ── Agent Orchestrator API ──────────────────────────────────────────────────
 v1Router.get('/agents', (req, res) => {
   res.json({
