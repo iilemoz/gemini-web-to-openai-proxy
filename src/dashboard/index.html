@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Universal AI Agent Infrastructure Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --primary: #58a6ff;
+      --accent: #2ea043;
+      --danger: #f85149;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 20px; font-weight: 600; color: #fff; }
+    .status-badge {
+      background: rgba(46, 160, 67, 0.2);
+      color: #3fb950;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card-title {
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .card-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--text-muted); font-weight: 600; }
+    pre {
+      background: #090d13;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      font-size: 12px;
+      color: #7ee787;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Universal AI Agent Infrastructure</h1>
+      <p style="color: var(--text-muted); font-size: 13px;">Gemini Web to OpenAI Proxy & Agent Engine</p>
+    </div>
+    <div class="status-badge" id="system-status">Operational</div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Registered Universal Tools</div>
+      <div class="card-value" id="stat-tools">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Agent Runs</div>
+      <div class="card-value" id="stat-runs">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Paired Runtime Devices</div>
+      <div class="card-value" id="stat-devices">-</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Cloud Sandboxes</div>
+      <div class="card-value" id="stat-sandboxes">-</div>
+    </div>
+  </div>
+
+  <div class="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('tools')">Tools Explorer</button>
+    <button class="tab-btn" onclick="switchTab('agents')">Agent Runs</button>
+    <button class="tab-btn" onclick="switchTab('models')">Models</button>
+    <button class="tab-btn" onclick="switchTab('raw')">System Stats (JSON)</button>
+  </div>
+
+  <div id="tab-tools" class="tab-content active card">
+    <table id="tools-table">
+      <thead>
+        <tr>
+          <th>Tool Name</th>
+          <th>Description</th>
+          <th>Required Permissions</th>
+          <th>Target</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="tab-agents" class="tab-content card">
+    <table id="agents-table">
+      <thead>
+        <tr>
+          <th>Run ID</th>
+          <th>Task</th>
+          <th>Role</th>
+          <th>Status</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="tab-models" class="tab-content card">
+    <table id="models-table">
+      <thead>
+        <tr>
+          <th>Model ID</th>
+          <th>Owned By</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="tab-raw" class="tab-content card">
+    <pre id="raw-stats">Loading...</pre>
+  </div>
+
+  <script>
+    function switchTab(name) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + name).classList.add('active');
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/dashboard/api/stats');
+        const data = await res.json();
+        
+        document.getElementById('stat-tools').innerText = data.tools.length;
+        document.getElementById('stat-runs').innerText = data.agentRuns.length;
+        document.getElementById('stat-devices').innerText = data.devices.length;
+        document.getElementById('stat-sandboxes').innerText = data.sandboxes.length;
+        document.getElementById('raw-stats').innerText = JSON.stringify(data, null, 2);
+
+        // Populate tools table
+        const toolsTbody = document.querySelector('#tools-table tbody');
+        toolsTbody.innerHTML = data.tools.map(t => `
+          <tr>
+            <td><strong>${t.name}</strong></td>
+            <td>${t.description}</td>
+            <td><code>${t.requiredPermissions.join(', ')}</code></td>
+            <td>${t.executionTarget}</td>
+          </tr>
+        `).join('');
+
+        // Populate agents table
+        const agentsTbody = document.querySelector('#agents-table tbody');
+        agentsTbody.innerHTML = data.agentRuns.map(r => `
+          <tr>
+            <td><code>${r.id}</code></td>
+            <td>${r.task.slice(0, 60)}</td>
+            <td>${r.role}</td>
+            <td><span class="status-badge">${r.status}</span></td>
+            <td>${new Date(r.createdAt).toLocaleTimeString()}</td>
+          </tr>
+        `).join('') || '<tr><td colspan="5">No active runs yet</td></tr>';
+
+        // Populate models table
+        const modelsTbody = document.querySelector('#models-table tbody');
+        modelsTbody.innerHTML = data.models.map(m => `
+          <tr>
+            <td><strong>${m.id}</strong></td>
+            <td>${m.owned_by}</td>
+            <td>${m.object}</td>
+          </tr>
+        `).join('');
+
+      } catch (err) {
+        console.error('Failed to load dashboard stats:', err);
+      }
+    }
+
+    loadStats();
+    setInterval(loadStats, 5000);
+  </script>
+</body>
+</html>

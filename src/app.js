@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { v1Router } from './routes/v1.js';
+import { dashboardRouter } from './dashboard/dashboardRouter.js';
 import { logger } from './utils/logger.js';
 import { config } from './config/index.js';
 
@@ -29,6 +30,9 @@ app.get('/health', (req, res) => {
 app.get('/healthz', (req, res) => {
   res.status(200).send('OK');
 });
+
+// Mount Developer Admin Dashboard
+app.use('/dashboard', dashboardRouter);
 
 // Mount OpenAI v1 compatible routes
 app.use('/v1', v1Router);
