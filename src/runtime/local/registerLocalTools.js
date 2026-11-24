@@ -3,6 +3,7 @@ import { registerFSTools } from './tools/fsTools.js';
 import { registerTerminalTools } from './tools/terminalTools.js';
 import { registerGitTools } from './tools/gitTools.js';
 import { registerProjectTools } from './tools/projectTools.js';
+import { devTools } from './tools/devTools.js';
 import { logger } from '../../utils/logger.js';
 
 export function registerLocalTools(registry = toolRegistry) {
@@ -10,5 +11,8 @@ export function registerLocalTools(registry = toolRegistry) {
   registerTerminalTools(registry);
   registerGitTools(registry);
   registerProjectTools(registry);
-  logger.info('[LocalRuntime] Registered Local Runtime tools (FS, Terminal, Git, Project)');
+  for (const tool of devTools) {
+    registry.register(tool);
+  }
+  logger.info('[LocalRuntime] Registered Local Runtime tools (FS, Terminal, Git, Project, DevTools)');
 }
