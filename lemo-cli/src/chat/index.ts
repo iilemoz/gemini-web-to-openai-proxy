@@ -1,8 +1,7 @@
 /**
- * Architectural Boundary: Chat Mode Module
- *
- * Scheduled for implementation in Phase 4.1.
- * Will provide interactive streaming terminal conversation sessions.
+ * Lemo CLI Chat Module Barrel Export
  */
 
-export const CHAT_MODE_STATUS = 'planned_phase_4_1';
+export * from './types.js';
+export * from './session.js';
+export * from './repl.js';

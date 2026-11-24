@@ -32,7 +32,7 @@ export interface ChatCompletionRequest {
 }
 
 export interface RequestOptions {
-  signal?: AbortSignal;
-  timeoutMs?: number;
-  headers?: Record<string, string>;
+  signal?: AbortSignal | undefined;
+  timeoutMs?: number | undefined;
+  headers?: Record<string, string> | undefined;
 }

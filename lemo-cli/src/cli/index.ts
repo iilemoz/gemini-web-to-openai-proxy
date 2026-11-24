@@ -8,6 +8,7 @@ import { printBanner, CLI_VERSION } from './interface/banner.js';
 import { createConfigCommand } from './commands/config.js';
 import { logger } from '../core/logging/index.js';
 import { formatErrorMessage } from '../core/errors/index.js';
+import { startChatSession } from '../chat/index.js';
 
 export function buildProgram(): Command {
   const program = new Command();
@@ -25,20 +26,21 @@ export function buildProgram(): Command {
         logger.setLevel('debug');
         logger.debug('Debug logging enabled.');
       }
+    })
+    .action(async () => {
+      await startChatSession();
     });
 
   // Attach configuration subcommands
   program.addCommand(createConfigCommand());
 
-  // Architectural boundary placeholder: Chat Mode (Phase 4.1)
+  // Interactive Chat Mode
   program
     .command('chat')
-    .description('Interactive AI Chat Mode with streaming (Scheduled for Phase 4.1)')
+    .description('Start an interactive AI chat session with streaming')
     .option('-m, --model <model>', 'Model override (e.g. gemini-flash, gemini-pro)')
-    .action(() => {
-      printBanner();
-      logger.info(pc.cyan('Chat Mode is scheduled for implementation in Phase 4.1.'));
-      logger.info('Please run "lemo config show" or "lemo --help" to inspect current options.');
+    .action(async (cmdOpts: { model?: string }) => {
+      await startChatSession({ modelOverride: cmdOpts.model });
     });
 
   // Architectural boundary placeholder: Agent Mode (Phase 4.2)
@@ -66,13 +68,6 @@ export async function runCli(argv = process.argv): Promise<void> {
   const program = buildProgram();
 
   try {
-    // If no arguments provided, show banner and help
-    if (argv.length <= 2) {
-      printBanner();
-      program.outputHelp();
-      return;
-    }
-
     await program.parseAsync(argv);
   } catch (err) {
     logger.error(formatErrorMessage(err));

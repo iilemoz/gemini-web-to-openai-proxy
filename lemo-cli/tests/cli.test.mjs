@@ -26,11 +26,10 @@ test('CLI: --help displays application name, options, and commands', async () =>
   assert.ok(stdout.includes('agent'));
 });
 
-test('CLI: invocation with no arguments displays banner and help', async () => {
-  const { stdout, stderr } = await execFileAsync(process.execPath, [BIN_PATH]);
-  assert.equal(stderr, '');
+test('CLI: invocation with no arguments launches chat startup and displays banner', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [BIN_PATH]);
   assert.ok(stdout.includes('Lemo CLI'));
-  assert.ok(stdout.includes('Usage: lemo'));
+  assert.ok(stdout.includes('Backend Target: Lemo Universal AI API Backend'));
 });
 
 test('CLI: config path command displays active path', async () => {
@@ -47,9 +46,10 @@ test('CLI: config show displays redacted configuration', async () => {
   assert.ok(stdout.includes('defaultModel'));
 });
 
-test('CLI: chat command displays planned Phase 4.1 notice', async () => {
-  const { stdout } = await execFileAsync(process.execPath, [BIN_PATH, 'chat']);
-  assert.ok(stdout.includes('Chat Mode is scheduled for implementation in Phase 4.1'));
+test('CLI: chat command accepts --help and describes streaming chat', async () => {
+  const { stdout } = await execFileAsync(process.execPath, [BIN_PATH, 'chat', '--help']);
+  assert.ok(stdout.includes('Start an interactive AI chat session with streaming'));
+  assert.ok(stdout.includes('--model'));
 });
 
 test('CLI: agent command displays planned Phase 4.2 notice', async () => {
