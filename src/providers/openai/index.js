@@ -1,5 +1,6 @@
 import { BaseProvider } from '../BaseProvider.js';
 import { logger } from '../../utils/logger.js';
+import { hasMultimodalContent } from '../../utils/multimodal.js';
 
 /**
  * Standard OpenAI model definitions with verified native capabilities.
@@ -245,6 +246,7 @@ export class OpenAIProvider extends BaseProvider {
       tools,
       tool_choice,
       response_format,
+      stop,
       temperature,
       top_p,
       max_tokens,
@@ -258,6 +260,16 @@ export class OpenAIProvider extends BaseProvider {
            m.upstreamModelId?.toLowerCase() === (model || '').toLowerCase()
     );
     const upstreamModel = matchingModel ? matchingModel.upstreamModelId : model;
+
+    // Check vision capability
+    if (hasMultimodalContent(messages) && matchingModel?.capabilities?.vision === false) {
+      const err = new Error(`Model '${upstreamModel}' does not support the 'vision' capability.`);
+      err.status = 400;
+      err.code = 'capability_not_supported';
+      err.type = 'invalid_request_error';
+      err.param = 'vision';
+      throw err;
+    }
 
     // Determine reasoning model capabilities
     const isReasoning = upstreamModel.startsWith('o1') || upstreamModel.startsWith('o3');
@@ -278,6 +290,10 @@ export class OpenAIProvider extends BaseProvider {
 
     if (response_format && typeof response_format === 'object') {
       payload.response_format = response_format;
+    }
+
+    if (stop !== undefined && stop !== null) {
+      payload.stop = stop;
     }
 
     if (stream) {

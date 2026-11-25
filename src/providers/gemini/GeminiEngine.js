@@ -1,6 +1,7 @@
 import { Gemini, Model } from 'gemini-web-sdk';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
+import { formatContentToPromptText, extractHttpImageUrls } from '../../utils/multimodal.js';
 
 /**
  * Engine for Google Gemini Web (Guest & Account Modes).
@@ -150,34 +151,7 @@ Instructions for tool calling:
    * @returns {string}
    */
   formatMessageContent(msg) {
-    let text = '';
-
-    if (typeof msg.content === 'string') {
-      text = msg.content.trim();
-
-    } else if (Array.isArray(msg.content)) {
-      text = msg.content
-        .map(part => {
-          if (!part) return '';
-
-          // Plain text part
-          if (part.type === 'text') return (part.text || '').trim();
-
-          // Image / Vision part
-          if (part.type === 'image_url') {
-            const rawUrl = part.image_url?.url || part.image_url || '';
-            if (!rawUrl) return '[Attached image]';
-            // Base64 data URIs cannot be passed as a URL to the SDK;
-            // include a note so the model at least knows an image was present.
-            if (rawUrl.startsWith('data:')) return '[Attached image (base64)]';
-            return `[Attached image: ${rawUrl}]`;
-          }
-
-          return JSON.stringify(part);
-        })
-        .join('\n')
-        .trim();
-    }
+    let text = formatContentToPromptText(msg.content);
 
     // If the assistant message carries previous tool_calls, replay them so the
     // model understands the conversation history.
@@ -203,21 +177,7 @@ Instructions for tool calling:
    * @returns {string[]}
    */
   extractImages(messages) {
-    const images = [];
-    if (!Array.isArray(messages)) return images;
-
-    for (const msg of messages) {
-      if (!Array.isArray(msg?.content)) continue;
-      for (const part of msg.content) {
-        if (part?.type !== 'image_url') continue;
-        const url = part.image_url?.url || '';
-        if (typeof url === 'string' && (url.startsWith('http://') || url.startsWith('https://'))) {
-          images.push(url);
-        }
-      }
-    }
-
-    return images;
+    return extractHttpImageUrls(messages);
   }
 
   /**

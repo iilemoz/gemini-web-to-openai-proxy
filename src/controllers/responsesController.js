@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
+import { hasMultimodalContent } from '../utils/multimodal.js';
 
 /**
  * POST /v1/responses
@@ -38,25 +39,48 @@ export async function handleResponses(req, res) {
   if (typeof input === 'string') {
     messages.push({ role: 'user', content: input });
   } else if (Array.isArray(input)) {
-    for (const item of input) {
-      if (typeof item === 'string') {
-        messages.push({ role: 'user', content: item });
-      } else if (item && typeof item === 'object') {
-        messages.push(item);
+    const isContentParts = input.length > 0 && input.every(item => item && typeof item === 'object' && ('type' in item) && !('role' in item));
+    if (isContentParts) {
+      messages.push({ role: 'user', content: input });
+    } else {
+      for (const item of input) {
+        if (typeof item === 'string') {
+          messages.push({ role: 'user', content: item });
+        } else if (item && typeof item === 'object') {
+          messages.push(item);
+        }
       }
     }
   }
 
   const token = req.geminiCookie || null;
+  const hasImages = hasMultimodalContent(messages);
+  const requiredCapabilities = ['responses'];
+  if (hasImages) {
+    requiredCapabilities.push('vision');
+  }
   
   // ── Resolve Provider via ModelRouter ──────────────────────────────────────
   let provider;
   if (registry._mockDefaultProvider) {
     provider = registry._mockDefaultProvider;
+    if (hasImages && typeof provider.getCapabilities === 'function') {
+      const caps = provider.getCapabilities(model);
+      if (caps && caps.vision === false) {
+        return res.status(400).json({
+          error: {
+            message: `Model '${model}' does not support the 'vision' capability.`,
+            type:    'invalid_request_error',
+            code:    'capability_not_supported',
+            param:   'vision'
+          }
+        });
+      }
+    }
   } else {
     try {
       const resolution = modelRouter.resolve(model, {
-        requiredCapability: 'responses'
+        requiredCapabilities
       });
       provider = resolution.provider;
     } catch (routingErr) {

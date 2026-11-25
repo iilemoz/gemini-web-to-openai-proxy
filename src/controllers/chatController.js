@@ -12,6 +12,11 @@ import { config } from '../config/index.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
+import {
+  hasMultimodalContent,
+  applyStopSequences,
+  createStreamingStopFilter
+} from '../utils/multimodal.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -53,12 +58,18 @@ function estimatePromptTokens(messages) {
  */
 export async function handleChatCompletion(req, res) {
   const {
-    model          = config.defaultModel,
-    messages       = [],
-    stream         = false,
-    tools          = [],
+    model                  = config.defaultModel,
+    messages               = [],
+    stream                 = false,
+    tools                  = [],
     tool_choice,
-    stream_options = {},
+    response_format,
+    stop,
+    temperature,
+    top_p,
+    max_tokens,
+    max_completion_tokens,
+    stream_options         = {},
     functions,
     function_call
   } = req.body;
@@ -86,12 +97,7 @@ export async function handleChatCompletion(req, res) {
   // ── Feature flags and capabilities ─────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
   const hasTools      = effectiveTools.length > 0;
-  const hasImages     = Array.isArray(messages) && messages.some(m => {
-    if (Array.isArray(m.content)) {
-      return m.content.some(part => part && (part.type === 'image_url' || part.type === 'image'));
-    }
-    return false;
-  });
+  const hasImages     = hasMultimodalContent(messages);
   const isJsonFormat  = Boolean(
     req.body.response_format &&
     (req.body.response_format.type === 'json_object' || req.body.response_format.type === 'json_schema')
@@ -107,6 +113,19 @@ export async function handleChatCompletion(req, res) {
   let provider;
   if (registry._mockDefaultProvider) {
     provider = registry._mockDefaultProvider;
+    if (hasImages && typeof provider.getCapabilities === 'function') {
+      const caps = provider.getCapabilities(model);
+      if (caps && caps.vision === false) {
+        return res.status(400).json({
+          error: {
+            message: `Model '${model}' does not support the 'vision' capability.`,
+            type:    'invalid_request_error',
+            code:    'capability_not_supported',
+            param:   'vision'
+          }
+        });
+      }
+    }
   } else {
     try {
       const resolution = modelRouter.resolve(model, {
@@ -189,6 +208,12 @@ export async function handleChatCompletion(req, res) {
         token,
         tools: effectiveTools,
         tool_choice,
+        response_format,
+        stop,
+        temperature,
+        top_p,
+        max_tokens,
+        max_completion_tokens,
         signal
       });
 
@@ -212,6 +237,11 @@ export async function handleChatCompletion(req, res) {
       let pendingContent    = '';
       let hasNativeToolCalls = false;
       let upstreamUsage     = null;
+
+      const stopFilter = createStreamingStopFilter(stop, (text) => {
+        res.write(formatSSEChunk(completionId, model, { content: text }));
+        chunkCount++;
+      });
 
       resetIdleTimer();
 
@@ -251,8 +281,10 @@ export async function handleChatCompletion(req, res) {
 
         // ── No tools or non-Gemini provider → pass through directly (fastest path) ───
         if (!hasTools || (provider.id !== 'gemini' && provider.name !== 'gemini')) {
-          res.write(formatSSEChunk(completionId, model, { content: chunkText }));
-          chunkCount++;
+          stopFilter.push(chunkText);
+          if (stopFilter.isStopped()) {
+            break;
+          }
           continue;
         }
 
@@ -268,8 +300,10 @@ export async function handleChatCompletion(req, res) {
             inDsmlMode = true;
             const beforeText = pendingContent.slice(0, match.index);
             if (beforeText) {
-              res.write(formatSSEChunk(completionId, model, { content: beforeText }));
-              chunkCount++;
+              stopFilter.push(beforeText);
+              if (stopFilter.isStopped()) {
+                break;
+              }
             }
             dsmlBuffer    = pendingContent.slice(match.index);
             pendingContent = '';
@@ -279,13 +313,17 @@ export async function handleChatCompletion(req, res) {
             if (lastLt !== -1 && pendingContent.length - lastLt < 20) {
               const safeText = pendingContent.slice(0, lastLt);
               if (safeText) {
-                res.write(formatSSEChunk(completionId, model, { content: safeText }));
-                chunkCount++;
+                stopFilter.push(safeText);
+                if (stopFilter.isStopped()) {
+                  break;
+                }
               }
               pendingContent = pendingContent.slice(lastLt);
             } else {
-              res.write(formatSSEChunk(completionId, model, { content: pendingContent }));
-              chunkCount++;
+              stopFilter.push(pendingContent);
+              if (stopFilter.isStopped()) {
+                break;
+              }
               pendingContent = '';
             }
           }
@@ -295,12 +333,15 @@ export async function handleChatCompletion(req, res) {
       if (idleTimer) clearTimeout(idleTimer);
 
       // ── Flush any remaining plain-text buffer ──────────────────────────────
-      if (pendingContent) {
-        res.write(formatSSEChunk(completionId, model, { content: pendingContent }));
+      if (pendingContent && !stopFilter.isStopped()) {
+        stopFilter.push(pendingContent);
       }
+      stopFilter.flush();
 
       // ── Emit parsed tool calls (or stop) ──────────────────────────────────
-      if (hasNativeToolCalls) {
+      if (stopFilter.isStopped()) {
+        res.write(formatSSEChunk(completionId, model, {}, 'stop'));
+      } else if (hasNativeToolCalls) {
         res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
       } else if (dsmlBuffer) {
         const { content: afterContent, toolCalls } = parseDSML(dsmlBuffer);
@@ -361,6 +402,12 @@ export async function handleChatCompletion(req, res) {
             token,
             tools: effectiveTools,
             tool_choice,
+            response_format,
+            stop,
+            temperature,
+            top_p,
+            max_tokens,
+            max_completion_tokens,
             signal
           });
 
@@ -407,6 +454,11 @@ export async function handleChatCompletion(req, res) {
               err.code = 'model_error';
               throw err;
             }
+          }
+
+          if (stop && finalContent) {
+            const stopRes = applyStopSequences(finalContent, stop);
+            finalContent = stopRes.text;
           }
 
           return {
