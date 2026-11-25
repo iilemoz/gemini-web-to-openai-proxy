@@ -45,6 +45,7 @@ export class GeminiProvider extends BaseProvider {
     return [
       {
         id: 'gemini-flash',
+        upstreamModelId: 'gemini-2.5-flash',
         name: 'Gemini Flash',
         description: 'Google Gemini 2.5 Flash / Gemini 3 Flash (Fast & Pure HTTP)',
         aliases: ['gemini-2.5-flash'],
@@ -53,11 +54,14 @@ export class GeminiProvider extends BaseProvider {
           stream: true,
           tools: true,
           vision: true,
-          json: true
+          json: true,
+          reasoning: false,
+          responses: true
         }
       },
       {
         id: 'gemini-pro',
+        upstreamModelId: 'gemini-2.5-pro',
         name: 'Gemini Pro',
         description: 'Google Gemini 2.5 Pro / Gemini 3 Pro (Complex Reasoning & Deep Knowledge)',
         aliases: ['gemini-2.5-pro'],
@@ -66,11 +70,14 @@ export class GeminiProvider extends BaseProvider {
           stream: true,
           tools: true,
           vision: true,
-          json: true
+          json: true,
+          reasoning: false,
+          responses: true
         }
       },
       {
         id: 'gemini-thinking',
+        upstreamModelId: 'gemini-2.5-thinking',
         name: 'Gemini Thinking',
         description: 'Google Gemini 2.5 Thinking with deep reasoning stream',
         aliases: ['gemini-2.5-thinking'],
@@ -79,11 +86,14 @@ export class GeminiProvider extends BaseProvider {
           stream: true,
           tools: false,
           vision: false,
-          json: false
+          json: false,
+          reasoning: true,
+          responses: true
         }
       },
       {
         id: 'gemini-lite',
+        upstreamModelId: 'gemini-lite',
         name: 'Gemini Lite',
         description: 'Google Gemini Lite Model',
         aliases: [],
@@ -92,7 +102,9 @@ export class GeminiProvider extends BaseProvider {
           stream: true,
           tools: false,
           vision: false,
-          json: false
+          json: false,
+          reasoning: false,
+          responses: true
         }
       }
     ];
@@ -109,7 +121,9 @@ export class GeminiProvider extends BaseProvider {
     const lower = modelId.toLowerCase();
     const models = this.getModels();
     return models.some(
-      m => m.id.toLowerCase() === lower || (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
+      m => m.id.toLowerCase() === lower ||
+           (m.upstreamModelId && m.upstreamModelId.toLowerCase() === lower) ||
+           (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
     );
   }
 
@@ -119,7 +133,30 @@ export class GeminiProvider extends BaseProvider {
    * @returns {Object}
    */
   getCapabilities(modelId) {
+    if (!modelId) {
+      return {
+        chat: true,
+        stream: true,
+        tools: false,
+        vision: false,
+        json: false,
+        reasoning: false,
+        responses: true
+      };
+    }
+
     const lower = String(modelId).toLowerCase();
+    const models = this.getModels();
+    const matched = models.find(
+      m => m.id.toLowerCase() === lower ||
+           (m.upstreamModelId && m.upstreamModelId.toLowerCase() === lower) ||
+           (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
+    );
+
+    if (matched && matched.capabilities) {
+      return { ...matched.capabilities };
+    }
+
     const isThinking = lower.includes('think');
     const isLite = lower.includes('lite');
 
@@ -128,7 +165,9 @@ export class GeminiProvider extends BaseProvider {
       stream: true,
       tools: !isThinking && !isLite,
       vision: !isThinking && !isLite,
-      json: !isThinking && !isLite
+      json: !isThinking && !isLite,
+      reasoning: isThinking,
+      responses: true
     };
   }
 

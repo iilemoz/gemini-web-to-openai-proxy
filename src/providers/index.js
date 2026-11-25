@@ -3,6 +3,7 @@ import { ModelRegistry } from './ModelRegistry.js';
 import { ModelRouter } from './ModelRouter.js';
 import { GeminiProvider } from './gemini/index.js';
 import { BaseProvider, ProviderAdapter } from './BaseProvider.js';
+import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 
 export { ProviderRegistry, ModelRegistry, ModelRouter, BaseProvider, ProviderAdapter };
@@ -22,6 +23,28 @@ for (const modelDef of geminiProvider.getModels()) {
     providerId: geminiProvider.id,
     owned_by: 'google'
   });
+}
+
+// Register legacy cross-provider compatibility aliases ONLY if explicitly enabled
+if (config.enableLegacyProviderAliases) {
+  logger.warn(
+    '[ProviderSetup] ENABLE_LEGACY_CROSS_PROVIDER_ALIASES=true: Registering synthetic cross-provider compatibility aliases.'
+  );
+  const legacyAliases = [
+    { alias: 'gpt-4o', target: 'gemini-flash', description: 'Legacy GPT-4o compatibility alias -> gemini-flash' },
+    { alias: 'gpt-4', target: 'gemini-flash', description: 'Legacy GPT-4 compatibility alias -> gemini-flash' },
+    { alias: 'deepseek-chat', target: 'gemini-flash', description: 'Legacy DeepSeek Chat compatibility alias -> gemini-flash' },
+    { alias: 'deepseek-coder', target: 'gemini-flash', description: 'Legacy DeepSeek Coder compatibility alias -> gemini-flash' },
+    { alias: 'deepseek-reasoner', target: 'gemini-thinking', description: 'Legacy DeepSeek Reasoner compatibility alias -> gemini-thinking' }
+  ];
+
+  for (const item of legacyAliases) {
+    try {
+      modelRegistry.registerLegacyAlias(item.alias, item.target, item.description);
+    } catch (err) {
+      logger.error(`[ProviderSetup] Failed to register legacy alias '${item.alias}': ${err.message}`);
+    }
+  }
 }
 
 /**

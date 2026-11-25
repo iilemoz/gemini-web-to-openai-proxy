@@ -83,7 +83,7 @@ export class GeminiEngine {
   resolveModel(modelName = '') {
     const lower = String(modelName).toLowerCase();
 
-    if (lower.includes('think') || lower.includes('reasoner') || lower.includes('r1')) {
+    if (lower.includes('think')) {
       return Model.BASIC_THINKING;
     }
 

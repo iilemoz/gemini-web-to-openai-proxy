@@ -55,7 +55,9 @@ export async function handleResponses(req, res) {
     provider = registry._mockDefaultProvider;
   } else {
     try {
-      const resolution = modelRouter.resolve(model);
+      const resolution = modelRouter.resolve(model, {
+        requiredCapability: 'responses'
+      });
       provider = resolution.provider;
     } catch (routingErr) {
       return res.status(routingErr.status || 404).json({

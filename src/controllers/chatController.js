@@ -83,9 +83,25 @@ export async function handleChatCompletion(req, res) {
     });
   }
 
-  // ── Feature flags ──────────────────────────────────────────────────────────
+  // ── Feature flags and capabilities ─────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
   const hasTools      = effectiveTools.length > 0;
+  const hasImages     = Array.isArray(messages) && messages.some(m => {
+    if (Array.isArray(m.content)) {
+      return m.content.some(part => part && (part.type === 'image_url' || part.type === 'image'));
+    }
+    return false;
+  });
+  const isJsonFormat  = Boolean(
+    req.body.response_format &&
+    (req.body.response_format.type === 'json_object' || req.body.response_format.type === 'json_schema')
+  );
+
+  const requiredCapabilities = [];
+  if (hasTools) requiredCapabilities.push('tools');
+  if (hasImages) requiredCapabilities.push('vision');
+  if (isJsonFormat) requiredCapabilities.push('json');
+  if (stream) requiredCapabilities.push('stream');
 
   // ── Resolve Provider and Validate Capabilities via ModelRouter ─────────────
   let provider;
@@ -94,7 +110,7 @@ export async function handleChatCompletion(req, res) {
   } else {
     try {
       const resolution = modelRouter.resolve(model, {
-        requiredCapability: hasTools ? 'tools' : undefined
+        requiredCapabilities
       });
       provider = resolution.provider;
     } catch (routingErr) {

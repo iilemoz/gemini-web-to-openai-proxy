@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { toolRegistry } from '../tools/index.js';
 import { agentOrchestrator } from '../agent/index.js';
 import { deviceManager, containerManager } from '../runtime/index.js';
+import { modelRegistry } from '../providers/index.js';
 import { config } from '../config/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,12 +26,7 @@ dashboardRouter.get('/', async (req, res) => {
 
 // JSON stats API powering the dashboard
 dashboardRouter.get('/api/stats', (req, res) => {
-  const models = Object.keys(config.modelAliases || {}).map(alias => ({
-    id: alias,
-    object: 'model',
-    created: 1700000000,
-    owned_by: 'gemini'
-  }));
+  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: true });
 
   const tools = toolRegistry.list();
   const agentRuns = agentOrchestrator.listRuns();

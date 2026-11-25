@@ -59,6 +59,7 @@ export class BaseProvider {
    * Override in subclasses to declare models.
    * @returns {Array<{
    *   id: string,
+   *   upstreamModelId?: string,
    *   name?: string,
    *   description?: string,
    *   aliases?: string[],
@@ -67,7 +68,9 @@ export class BaseProvider {
    *     stream?: boolean,
    *     tools?: boolean,
    *     vision?: boolean,
-   *     json?: boolean
+   *     json?: boolean,
+   *     reasoning?: boolean,
+   *     responses?: boolean
    *   }
    * }>}
    */
@@ -77,14 +80,20 @@ export class BaseProvider {
 
   /**
    * Checks whether this provider supports the requested model.
+   * Performs case-insensitive matching against model ID, upstreamModelId, and aliases.
    * @param {string} modelId
    * @returns {boolean}
    */
   supportsModel(modelId) {
-    if (!modelId) return false;
+    if (!modelId || typeof modelId !== 'string') return false;
+    const lower = modelId.toLowerCase();
     const models = this.getModels();
-    if (!models || models.length === 0) return true; // Default fallback for ad-hoc test mock providers
-    return models.some(m => m.id === modelId || (Array.isArray(m.aliases) && m.aliases.includes(modelId)));
+    if (!models || models.length === 0) return false;
+    return models.some(m =>
+      (m.id && m.id.toLowerCase() === lower) ||
+      (m.upstreamModelId && m.upstreamModelId.toLowerCase() === lower) ||
+      (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
+    );
   }
 
   /**
@@ -95,18 +104,30 @@ export class BaseProvider {
    *   stream: boolean,
    *   tools: boolean,
    *   vision: boolean,
-   *   json: boolean
+   *   json: boolean,
+   *   reasoning: boolean,
+   *   responses: boolean
    * }}
    */
   getCapabilities(modelId) {
     const models = this.getModels();
-    const found = models.find(m => m.id === modelId || (Array.isArray(m.aliases) && m.aliases.includes(modelId)));
+    let found = null;
+    if (Array.isArray(models) && models.length > 0 && modelId) {
+      const lower = modelId.toLowerCase();
+      found = models.find(m =>
+        (m.id && m.id.toLowerCase() === lower) ||
+        (m.upstreamModelId && m.upstreamModelId.toLowerCase() === lower) ||
+        (Array.isArray(m.aliases) && m.aliases.some(a => a.toLowerCase() === lower))
+      );
+    }
     return {
       chat: true,
       stream: true,
       tools: true,
       vision: false,
       json: false,
+      reasoning: false,
+      responses: true,
       ...(found?.capabilities || {})
     };
   }

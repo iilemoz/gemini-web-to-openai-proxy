@@ -2,10 +2,11 @@ import { modelRegistry } from '../providers/index.js';
 
 /**
  * GET /v1/models
- * Returns all registered and available models in OpenAI list format.
+ * Returns all registered and available genuine models in OpenAI list format.
+ * Omits synthetic/legacy aliases from public advertisement.
  */
 export function listModels(req, res) {
-  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: true });
+  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: true, includeSynthetic: false });
   res.json({
     object: 'list',
     data: models
@@ -19,9 +20,9 @@ export function listModels(req, res) {
 export function getModel(req, res) {
   const { model } = req.params;
 
-  const found = modelRegistry.getModel(model);
+  const resolution = modelRegistry.resolve(model);
 
-  if (!found) {
+  if (!resolution) {
     return res.status(404).json({
       error: {
         message: `The model '${model}' does not exist.`,
@@ -32,14 +33,15 @@ export function getModel(req, res) {
     });
   }
 
+  const found = resolution.model;
   res.json({
-    id: model,
+    id: resolution.isAlias ? model : found.id,
     object: 'model',
     created: found.created,
     owned_by: found.owned_by,
     permission: found.permission || [],
     root: found.id,
-    parent: found.parent,
+    parent: resolution.isAlias ? found.id : found.parent,
     description: found.description,
     capabilities: found.capabilities
   });
