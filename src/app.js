@@ -3,6 +3,7 @@ import { v1Router } from './routes/v1.js';
 import { dashboardRouter } from './dashboard/dashboardRouter.js';
 import { logger } from './utils/logger.js';
 import { requestTracker } from './utils/requestTracker.js';
+import { readiness } from './utils/readiness.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { createCorsMiddleware } from './middleware/corsConfig.js';
 
@@ -11,7 +12,33 @@ export const app = express();
 // Apply defensive HTTP security response headers
 app.use(securityHeaders);
 
-// Reject new incoming requests during graceful shutdown
+// Production-hardened CORS middleware
+app.use(createCorsMiddleware());
+
+// Liveness endpoint (always available while HTTP process is running)
+app.get('/healthz', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Readiness endpoint (reflects initialization and active shutdown state)
+app.get('/readyz', (req, res) => {
+  const statusInfo = readiness.getStatus();
+  if (statusInfo.ready) {
+    return res.status(200).json(statusInfo);
+  }
+  return res.status(503).json(statusInfo);
+});
+
+// Aggregate health endpoint for backward compatibility
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'Google Gemini Web to OpenAI Proxy',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Reject new incoming requests during graceful shutdown (except /healthz)
 app.use((req, res, next) => {
   if (requestTracker.isShuttingDown) {
     return res.status(503).json({
@@ -25,9 +52,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Production-hardened CORS middleware
-app.use(createCorsMiddleware());
-
 // Body parsing with safe size bounds
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -36,19 +60,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.originalUrl}`);
   next();
-});
-
-// Standard health endpoints
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'Google Gemini Web to OpenAI Proxy',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/healthz', (req, res) => {
-  res.status(200).send('OK');
 });
 
 // Mount Developer Admin Dashboard

@@ -118,12 +118,13 @@ export async function handleResponses(req, res) {
     }, config.requestTimeoutMs);
   }
 
-  res.on('close', () => {
+  const onClientClose = () => {
     if (!res.writableEnded) {
       logger.info(`[Responses API] Client disconnected – aborting ${responseId}.`);
-      abortController.abort();
+      abortController.abort(new Error('Client disconnected'));
     }
-  });
+  };
+  res.once('close', onClientClose);
 
   try {
     const fullContent = await executeWithRetry(
@@ -217,6 +218,7 @@ export async function handleResponses(req, res) {
       }
     });
   } finally {
+    res.removeListener('close', onClientClose);
     if (timeoutTimer) clearTimeout(timeoutTimer);
     requestTracker.untrack(responseId);
   }

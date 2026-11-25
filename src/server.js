@@ -1,8 +1,10 @@
 import http from 'node:http';
 import { app } from './app.js';
 import { config } from './config/index.js';
+import { validateStartupConfig } from './config/validator.js';
 import { logger } from './utils/logger.js';
 import { requestTracker } from './utils/requestTracker.js';
+import { readiness } from './utils/readiness.js';
 import { stopRateLimiterCleanup } from './middleware/rateLimiter.js';
 
 const banner = `
@@ -21,12 +23,15 @@ export const server = http.createServer(app);
 
 // Programmatic graceful shutdown function for production and automated testing
 export async function gracefulShutdown(serverInstance = server, gracePeriodMs = config.shutdownGracePeriodMs) {
-  if (requestTracker.isShuttingDown) return;
+  if (requestTracker.isShuttingDown) return true;
   logger.info(`Starting graceful shutdown (grace period: ${gracePeriodMs}ms)...`);
+  
+  // Mark server as not ready and initiate request tracking shutdown
+  readiness.setInitialized(false);
   requestTracker.startShutdown();
   stopRateLimiterCleanup();
 
-  if (serverInstance && serverInstance.close) {
+  if (serverInstance && typeof serverInstance.close === 'function') {
     serverInstance.close(() => {
       logger.info('HTTP server closed to new connections.');
     });
@@ -54,17 +59,24 @@ const isDirectRun = Boolean(
 );
 
 if (isDirectRun && process.env.NODE_ENV !== 'test') {
-  if (config.isProduction && !config.proxyApiKey) {
-    logger.error('CRITICAL SECURITY ERROR: PROXY_API_KEY must be configured when running in production mode (NODE_ENV=production).');
+  const validation = validateStartupConfig(config);
+  if (!validation.valid) {
+    for (const err of validation.errors) {
+      logger.error(`[StartupValidation] ${err}`);
+    }
     process.exit(1);
   }
 
   server.listen(config.port, config.host, () => {
+    readiness.setInitialized(true);
     console.log(banner);
     logger.success(`Server listening on ${config.host}:${config.port} (IPv4 & IPv6 dual-stack)`);
   });
 
+  let shutdownInProgress = false;
   const handleTermination = async (signal) => {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
     logger.info(`Received ${signal}. Initiating graceful shutdown...`);
     await gracefulShutdown(server, config.shutdownGracePeriodMs);
     process.exit(0);

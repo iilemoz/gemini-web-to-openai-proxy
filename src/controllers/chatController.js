@@ -178,12 +178,13 @@ export async function handleChatCompletion(req, res) {
   }
 
   // Listen on `res` for disconnect detection.
-  res.on('close', () => {
+  const onClientClose = () => {
     if (!res.writableEnded) {
       logger.info(`[ChatController] Client disconnected – aborting completion ${completionId}.`);
-      abortController.abort();
+      abortController.abort(new Error('Client disconnected'));
     }
-  });
+  };
+  res.once('close', onClientClose);
 
   const promptTokens  = estimatePromptTokens(messages);
 
@@ -546,6 +547,7 @@ export async function handleChatCompletion(req, res) {
       }
     }
   } finally {
+    res.removeListener('close', onClientClose);
     if (idleTimer) clearTimeout(idleTimer);
     if (timeoutTimer) clearTimeout(timeoutTimer);
     requestTracker.untrack(completionId);
