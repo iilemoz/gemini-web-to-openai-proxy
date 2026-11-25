@@ -3,7 +3,9 @@ dotenv.config();
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
-  host: process.env.HOST || '0.0.0.0',
+  host: process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1'),
+  nodeEnv: process.env.NODE_ENV || 'development',
+  isProduction: (process.env.NODE_ENV || 'development') === 'production',
   defaultModel: process.env.DEFAULT_MODEL || 'gemini-flash',
   geminiSecure1psid: process.env.GEMINI_SECURE_1PSID || '',
   geminiSecure1psidts: process.env.GEMINI_SECURE_1PSIDTS || '',
@@ -35,7 +37,7 @@ export const config = {
       permission: [],
       root: 'gemini-flash',
       parent: null,
-      description: 'Google Gemini 2.5 Flash / Gemini 3 Flash (Fast & Pure HTTP)'
+      description: 'Google Gemini Flash (Web)'
     },
     {
       id: 'gemini-2.5-flash',
@@ -43,9 +45,9 @@ export const config = {
       created: 1715500000,
       owned_by: 'google',
       permission: [],
-      root: 'gemini-2.5-flash',
-      parent: null,
-      description: 'Google Gemini 2.5 Flash Flagship Speed Alias'
+      root: 'gemini-flash',
+      parent: 'gemini-flash',
+      description: 'Google Gemini Flash Compatibility Alias'
     },
     {
       id: 'gemini-pro',
@@ -55,7 +57,7 @@ export const config = {
       permission: [],
       root: 'gemini-pro',
       parent: null,
-      description: 'Google Gemini 2.5 Pro / Gemini 3 Pro (Complex Reasoning & Deep Knowledge)'
+      description: 'Google Gemini Pro (Web)'
     },
     {
       id: 'gemini-2.5-pro',
@@ -63,9 +65,9 @@ export const config = {
       created: 1715500000,
       owned_by: 'google',
       permission: [],
-      root: 'gemini-2.5-pro',
-      parent: null,
-      description: 'Google Gemini 2.5 Pro Alias'
+      root: 'gemini-pro',
+      parent: 'gemini-pro',
+      description: 'Google Gemini Pro Compatibility Alias'
     },
     {
       id: 'gemini-thinking',
@@ -75,7 +77,7 @@ export const config = {
       permission: [],
       root: 'gemini-thinking',
       parent: null,
-      description: 'Google Gemini Thinking with Deep Reasoning stream'
+      description: 'Google Gemini Thinking (Web)'
     },
     {
       id: 'gemini-2.5-thinking',
@@ -83,9 +85,9 @@ export const config = {
       created: 1715500000,
       owned_by: 'google',
       permission: [],
-      root: 'gemini-2.5-thinking',
-      parent: null,
-      description: 'Google Gemini 2.5 Thinking Model'
+      root: 'gemini-thinking',
+      parent: 'gemini-thinking',
+      description: 'Google Gemini Thinking Compatibility Alias'
     },
     {
       id: 'gemini-lite',
@@ -95,7 +97,7 @@ export const config = {
       permission: [],
       root: 'gemini-lite',
       parent: null,
-      description: 'Google Gemini Lite'
+      description: 'Google Gemini Lite (Web)'
     }
   ]
 };

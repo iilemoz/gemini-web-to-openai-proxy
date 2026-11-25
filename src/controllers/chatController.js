@@ -475,7 +475,7 @@ export async function handleChatCompletion(req, res) {
       res.status(status).json({
         error: {
           message: err.message || 'Internal server error while processing completion',
-          type:    status === 502 ? 'upstream_error' : 'api_error',
+          type:    err.type || (status === 502 ? 'upstream_error' : (status === 429 ? 'insufficient_quota' : 'api_error')),
           code:    err.code || 'internal_error'
         }
       });

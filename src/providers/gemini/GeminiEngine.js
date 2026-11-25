@@ -325,7 +325,7 @@ Instructions for tool calling:
       }
 
     } catch (err) {
-      // Account plan limit → seamless Guest Mode fallback
+      // Account plan limit → same-model Guest Mode fallback ONLY for Flash
       const isLimitErr =
         !isGuest && (
           err.name === 'UsageLimitExceeded' ||
@@ -334,33 +334,51 @@ Instructions for tool calling:
         );
 
       if (isLimitErr) {
-        logger.warn(`[GeminiEngine] Account plan restriction (${err.message}). Falling back to Guest Mode…`);
+        // Enforce model identity integrity: only allow Guest fallback if the requested model is BASIC_FLASH
+        if (resolvedModel === Model.BASIC_FLASH) {
+          logger.warn(`[GeminiEngine] Account plan restriction for Flash (${err.message}). Falling back to Guest Mode (same model)…`);
 
-        const guestClient = new Gemini({ autoClose: false });
-        try {
-          const guestChat = guestClient.newChat({ model: Model.BASIC_FLASH });
-          const guestStream = await guestChat.generateContentStream(generateOpts);
+          const guestClient = new Gemini({ autoClose: false });
+          try {
+            const guestChat = guestClient.newChat({ model: Model.BASIC_FLASH });
+            const guestStream = await guestChat.generateContentStream(generateOpts);
 
-          for await (const chunk of guestStream) {
-            if (signal?.aborted) return;
+            for await (const chunk of guestStream) {
+              if (signal?.aborted) return;
 
-            const candidate = chunk.candidates?.find(c => c.index === 0) || chunk.candidates?.[0];
-            if (!candidate) continue;
+              const candidate = chunk.candidates?.find(c => c.index === 0) || chunk.candidates?.[0];
+              if (!candidate) continue;
 
-            if (candidate.thoughts_delta) {
-              yield { type: 'thinking', text: candidate.thoughts_delta };
-            }
+              if (candidate.thoughts_delta) {
+                yield { type: 'thinking', text: candidate.thoughts_delta };
+              }
 
-            if (candidate.text_delta) {
-              const clean = candidate.text_delta.replace(/https?:\/\/googleusercontent\.com\/[^\s\n]+/gi, '');
-              if (clean) {
-                hasYieldedContent = true;
-                yield { type: 'content', text: clean };
+              if (candidate.text_delta) {
+                const clean = candidate.text_delta.replace(/https?:\/\/googleusercontent\.com\/[^\s\n]+/gi, '');
+                if (clean) {
+                  hasYieldedContent = true;
+                  yield { type: 'content', text: clean };
+                }
               }
             }
+          } finally {
+            guestClient.close().catch(() => {});
           }
-        } finally {
-          guestClient.close().catch(() => {});
+        } else {
+          // Requested model is Pro, Thinking, Lite, etc.
+          // Silently downgrading to Flash is strictly forbidden. Fail closed!
+          logger.error(
+            `[GeminiEngine] Account quota exceeded for requested model '${resolvedModel.model_name}'. ` +
+            `Silent downgrade to Flash is prohibited.`
+          );
+          const quotaErr = new Error(
+            `Account quota or plan limit exceeded for model '${resolvedModel.model_name}'. ` +
+            `Automatic downgrade to another model is disabled to maintain model identity integrity.`
+          );
+          quotaErr.status = 429;
+          quotaErr.code = 'insufficient_quota';
+          quotaErr.type = 'insufficient_quota';
+          throw quotaErr;
         }
 
       } else {

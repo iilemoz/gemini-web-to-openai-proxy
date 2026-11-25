@@ -73,8 +73,8 @@ export function isRetryableError(err) {
   // Check HTTP status code
   const status = err.status || err.statusCode || err.response?.status;
   if (typeof status === 'number') {
-    if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422) {
-      return false; // Permanent client / auth errors
+    if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422 || err.code === 'insufficient_quota') {
+      return false; // Permanent client / quota exhaustion errors
     }
     return isRetryableStatusCode(status);
   }

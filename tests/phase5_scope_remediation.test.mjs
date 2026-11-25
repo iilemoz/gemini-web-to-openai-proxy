@@ -1,0 +1,382 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { app } from '../src/app.js';
+import { config } from '../src/config/index.js';
+import { modelRegistry, modelRouter } from '../src/providers/index.js';
+import { GeminiEngine } from '../src/providers/gemini/GeminiEngine.js';
+import { Model } from 'gemini-web-sdk';
+import {
+  isImagePayload,
+  validateMessageContent,
+  validateResponsesInput
+} from '../src/utils/textOnlyValidator.js';
+import { authMiddleware } from '../src/middleware/auth.js';
+
+let server;
+let baseUrl;
+
+test.before(async () => {
+  server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, resolve));
+  const port = server.address().port;
+  baseUrl = `http://127.0.0.1:${port}`;
+});
+
+test.after(async () => {
+  if (server) {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Text-Only Validation: Legitimate Text with Image URLs (FINDING 50F1-01)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('FINDING 50F1-01: isImagePayload permits legitimate text referencing image URLs', () => {
+  const allowedTexts = [
+    'Check out https://example.com/logo.png for the latest branding.',
+    'Review the image at https://assets.site.org/images/hero.jpg?v=2 and comment.',
+    'Failed to load asset at /var/www/static/img/avatar.webp',
+    'button { background-image: url("https://cdn.example.com/icons/search.png"); }',
+    '<img src="https://example.com/banner.gif" alt="Banner" width="200" />',
+    'const icon = require("./assets/icon.svg");',
+    'Here is a list of supported formats: png, jpg, gif, webp, svg.',
+    'C:\\Users\\User\\Pictures\\screenshot.bmp'
+  ];
+
+  for (const text of allowedTexts) {
+    assert.equal(isImagePayload(text), false, `Should NOT treat as image payload: ${text}`);
+    assert.equal(validateMessageContent(text), null, `validateMessageContent should pass: ${text}`);
+    assert.equal(validateResponsesInput(text), null, `validateResponsesInput should pass: ${text}`);
+  }
+});
+
+test('FINDING 50F1-01: HTTP POST /v1/chat/completions accepts messages with image URLs in text', async () => {
+  const testPrompts = [
+    'Please inspect https://example.com/logo.png and explain the CSS colors.',
+    'background-image: url("https://example.com/bg.jpeg");',
+    '<img src="https://example.com/banner.gif" />'
+  ];
+
+  for (const content of testPrompts) {
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gemini-flash',
+        messages: [{ role: 'user', content }]
+      })
+    });
+
+    // The validation middleware MUST NOT reject this with 400 image_input_unsupported.
+    // It should proceed past validation (either 200 or upstream response, NOT 400 image_input_unsupported).
+    if (res.status === 400) {
+      const err = await res.json();
+      assert.notEqual(err.error?.code, 'image_input_unsupported', `Unexpected rejection for text: ${content}`);
+    }
+  }
+});
+
+test('FINDING 50F1-01 & 50F1-02: HTTP POST /v1/responses accepts text with image URLs', async () => {
+  const res = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      input: 'Please analyze this CSS rule: background-image: url("https://example.com/style.png");'
+    })
+  });
+
+  if (res.status === 400) {
+    const err = await res.json();
+    assert.notEqual(err.error?.code, 'image_input_unsupported');
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. Strict Rejection of Real Image Payloads (FINDING 50F1-01 & 50F1-02)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('FINDING 50F1-01 & 50F1-02: Rejects structured image_url in /v1/chat/completions', async () => {
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is in this picture?' },
+            { type: 'image_url', image_url: { url: 'https://example.com/photo.png' } }
+          ]
+        }
+      ]
+    })
+  });
+
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.equal(data.error.code, 'image_input_unsupported');
+  assert.equal(data.error.type, 'invalid_request_error');
+});
+
+test('FINDING 50F1-01 & 50F1-02: Rejects base64 data URI in /v1/chat/completions', async () => {
+  const base64Uri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        { role: 'user', content: `Here is my avatar: ${base64Uri}` }
+      ]
+    })
+  });
+
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.equal(data.error.code, 'image_input_unsupported');
+});
+
+test('FINDING 50F1-01 & 50F1-02: Rejects markdown image syntax in /v1/chat/completions', async () => {
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        { role: 'user', content: 'Here is the diagram: ![diagram](https://example.com/arch.png)' }
+      ]
+    })
+  });
+
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.equal(data.error.code, 'image_input_unsupported');
+});
+
+test('FINDING 50F1-01 & 50F1-02: Rejects non-text modality in /v1/chat/completions', async () => {
+  const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_audio', input_audio: { data: 'abc==', format: 'mp3' } }
+          ]
+        }
+      ]
+    })
+  });
+
+  assert.equal(res.status, 400);
+  const data = await res.json();
+  assert.equal(data.error.code, 'unsupported_content_type');
+});
+
+test('FINDING 50F1-01 & 50F1-02: Rejects base64 and markdown images in /v1/responses', async () => {
+  // 1. Base64
+  const res1 = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      input: 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+    })
+  });
+  assert.equal(res1.status, 400);
+  const data1 = await res1.json();
+  assert.equal(data1.error.code, 'image_input_unsupported');
+
+  // 2. Markdown image
+  const res2 = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      input: 'Check this: ![alt](https://example.com/photo.jpg)'
+    })
+  });
+  assert.equal(res2.status, 400);
+  const data2 = await res2.json();
+  assert.equal(data2.error.code, 'image_input_unsupported');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Quota Fallback & Prevention of Silent Model Downgrade (FINDING 50F1-03)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('FINDING 50F1-03: GeminiEngine allows guest fallback ONLY for BASIC_FLASH on quota error', async () => {
+  const engine = new GeminiEngine();
+
+  // Mock account client that throws UsageLimitExceeded
+  const mockLimitError = new Error('Usage limit exceeded for your account plan');
+  mockLimitError.name = 'UsageLimitExceeded';
+
+  const fakeAccountClient = {
+    newChat: () => ({
+      generateContentStream: async () => {
+        throw mockLimitError;
+      }
+    })
+  };
+
+  engine.getClient = () => ({
+    client: fakeAccountClient,
+    isTemporary: false
+  });
+
+  // 1. Pro model MUST throw 429 insufficient_quota instead of falling back to Flash
+  let caughtError = null;
+  try {
+    const generator = engine.streamChat({
+      model: 'gemini-pro',
+      messages: [{ role: 'user', content: 'Complex reasoning query' }]
+    });
+    for await (const _ of generator) {}
+  } catch (err) {
+    caughtError = err;
+  }
+
+  assert.ok(caughtError, 'Expected error to be thrown for Pro model on quota limit');
+  assert.equal(caughtError.status, 429);
+  assert.equal(caughtError.code, 'insufficient_quota');
+  assert.ok(caughtError.message.includes('gemini-3-pro'));
+  assert.ok(caughtError.message.includes('Automatic downgrade'));
+
+  // 2. Thinking model MUST ALSO throw 429 insufficient_quota
+  let caughtThinkingError = null;
+  try {
+    const generator = engine.streamChat({
+      model: 'gemini-thinking',
+      messages: [{ role: 'user', content: 'Deep thinking query' }]
+    });
+    for await (const _ of generator) {}
+  } catch (err) {
+    caughtThinkingError = err;
+  }
+
+  assert.ok(caughtThinkingError, 'Expected error to be thrown for Thinking model on quota limit');
+  assert.equal(caughtThinkingError.status, 429);
+  assert.equal(caughtThinkingError.code, 'insufficient_quota');
+  assert.ok(caughtThinkingError.message.includes('gemini-3-thinking'));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Production Authentication & Host Binding (FINDING 50F1-04)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('FINDING 50F1-04: authMiddleware enforces PROXY_API_KEY in production mode', () => {
+  const origIsProd = config.isProduction;
+  const origKey = config.proxyApiKey;
+
+  try {
+    config.isProduction = true;
+    config.proxyApiKey = '';
+
+    let resStatus = null;
+    let resBody = null;
+    let nextCalled = false;
+
+    const fakeReq = { headers: {}, ip: '127.0.0.1', originalUrl: '/v1/chat/completions' };
+    const fakeRes = {
+      status(s) {
+        resStatus = s;
+        return this;
+      },
+      json(b) {
+        resBody = b;
+        return this;
+      }
+    };
+    const next = () => { nextCalled = true; };
+
+    authMiddleware(fakeReq, fakeRes, next);
+
+    assert.equal(nextCalled, false);
+    assert.equal(resStatus, 500);
+    assert.equal(resBody?.error?.code, 'missing_production_api_key');
+  } finally {
+    config.isProduction = origIsProd;
+    config.proxyApiKey = origKey;
+  }
+});
+
+test('FINDING 50F1-04: authMiddleware permits unauthenticated access in development mode', () => {
+  const origIsProd = config.isProduction;
+  const origKey = config.proxyApiKey;
+
+  try {
+    config.isProduction = false;
+    config.proxyApiKey = '';
+
+    let nextCalled = false;
+    const fakeReq = { headers: {}, ip: '127.0.0.1', originalUrl: '/v1/models' };
+    const fakeRes = {
+      status() { return this; },
+      json() { return this; }
+    };
+    const next = () => { nextCalled = true; };
+
+    authMiddleware(fakeReq, fakeRes, next);
+
+    assert.equal(nextCalled, true, 'Next should be called in dev mode when proxyApiKey is empty');
+  } finally {
+    config.isProduction = origIsProd;
+    config.proxyApiKey = origKey;
+  }
+});
+
+test('FINDING 50F1-04: Development host defaults to 127.0.0.1', () => {
+  assert.equal(config.host, '127.0.0.1');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Truthful Model Identity & Registry Integrity (FINDING 50F1-05)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('FINDING 50F1-05: /v1/models exposes only canonical genuine models without misleading 2.5 claims', async () => {
+  const res = await fetch(`${baseUrl}/v1/models`);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  assert.equal(data.object, 'list');
+  const ids = data.data.map(m => m.id);
+
+  // Canonical models MUST be present
+  assert.ok(ids.includes('gemini-flash'));
+  assert.ok(ids.includes('gemini-pro'));
+  assert.ok(ids.includes('gemini-thinking'));
+  assert.ok(ids.includes('gemini-lite'));
+
+  // Misleading 2.5 aliases should NOT be advertised in public models list
+  assert.ok(!ids.includes('gemini-2.5-flash'), 'gemini-2.5-flash should not be in public /v1/models');
+  assert.ok(!ids.includes('gemini-2.5-pro'), 'gemini-2.5-pro should not be in public /v1/models');
+  assert.ok(!ids.includes('gemini-2.5-thinking'), 'gemini-2.5-thinking should not be in public /v1/models');
+
+  // Descriptions must be truthful
+  for (const model of data.data) {
+    assert.equal(model.owned_by, 'google');
+    assert.ok(!model.description.includes('2.5'), `Description should not claim 2.5: ${model.description}`);
+  }
+});
+
+test('FINDING 50F1-05: Backward compatibility resolution for aliases remains functional', () => {
+  const resFlash = modelRouter.resolve('gemini-2.5-flash');
+  assert.equal(resFlash.model.id, 'gemini-flash');
+  assert.equal(resFlash.model.upstreamModelId, 'gemini-3-flash');
+
+  const resPro = modelRouter.resolve('gemini-2.5-pro');
+  assert.equal(resPro.model.id, 'gemini-pro');
+  assert.equal(resPro.model.upstreamModelId, 'gemini-3-pro');
+
+  const resThinking = modelRouter.resolve('gemini-2.5-thinking');
+  assert.equal(resThinking.model.id, 'gemini-thinking');
+  assert.equal(resThinking.model.upstreamModelId, 'gemini-3-thinking');
+});

@@ -45,9 +45,9 @@ export class GeminiProvider extends BaseProvider {
     return [
       {
         id: 'gemini-flash',
-        upstreamModelId: 'gemini-2.5-flash',
+        upstreamModelId: 'gemini-3-flash',
         name: 'Gemini Flash',
-        description: 'Google Gemini 2.5 Flash / Gemini 3 Flash (Fast & Pure HTTP)',
+        description: 'Google Gemini Flash (Web)',
         aliases: ['gemini-2.5-flash'],
         capabilities: {
           chat: true,
@@ -60,9 +60,9 @@ export class GeminiProvider extends BaseProvider {
       },
       {
         id: 'gemini-pro',
-        upstreamModelId: 'gemini-2.5-pro',
+        upstreamModelId: 'gemini-3-pro',
         name: 'Gemini Pro',
-        description: 'Google Gemini 2.5 Pro / Gemini 3 Pro (Complex Reasoning & Deep Knowledge)',
+        description: 'Google Gemini Pro (Web)',
         aliases: ['gemini-2.5-pro'],
         capabilities: {
           chat: true,
@@ -75,9 +75,9 @@ export class GeminiProvider extends BaseProvider {
       },
       {
         id: 'gemini-thinking',
-        upstreamModelId: 'gemini-2.5-thinking',
+        upstreamModelId: 'gemini-3-thinking',
         name: 'Gemini Thinking',
-        description: 'Google Gemini 2.5 Thinking with deep reasoning stream',
+        description: 'Google Gemini Thinking (Web)',
         aliases: ['gemini-2.5-thinking'],
         capabilities: {
           chat: true,
@@ -90,9 +90,9 @@ export class GeminiProvider extends BaseProvider {
       },
       {
         id: 'gemini-lite',
-        upstreamModelId: 'gemini-lite',
+        upstreamModelId: 'gemini-3-lite',
         name: 'Gemini Lite',
-        description: 'Google Gemini Lite Model',
+        description: 'Google Gemini Lite (Web)',
         aliases: [],
         capabilities: {
           chat: true,

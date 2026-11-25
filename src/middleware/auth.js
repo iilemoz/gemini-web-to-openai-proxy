@@ -15,6 +15,19 @@ import { logger } from '../utils/logger.js';
  *      the token is a genuine Google __Secure-1PSID (starts with 'g.a.' or has length > 60).
  */
 export function authMiddleware(req, res, next) {
+  // If running in production mode and PROXY_API_KEY is not configured:
+  // Refuse unauthenticated requests with HTTP 500 server_error.
+  if (config.isProduction && !config.proxyApiKey) {
+    logger.error('[Auth] Critical security configuration error: PROXY_API_KEY is not configured in production environment.');
+    return res.status(500).json({
+      error: {
+        message: 'Proxy API key is not configured in production environment. Refusing unauthenticated requests.',
+        type: 'server_error',
+        code: 'missing_production_api_key'
+      }
+    });
+  }
+
   const authHeader = req.headers['authorization'] || '';
   const apiKeyHeader = req.headers['x-api-key'] || '';
 
@@ -38,6 +51,9 @@ export function authMiddleware(req, res, next) {
         }
       });
     }
+  } else if (!config.isProduction) {
+    // Development mode warning on unauthenticated request
+    logger.warn(`[Auth] Unauthenticated request permitted in development mode from ${req.ip} to ${req.originalUrl}`);
   }
 
   // Extract explicit Gemini cookie from custom headers if passed

@@ -52,9 +52,14 @@ const isDirectRun = Boolean(
 );
 
 if (isDirectRun && process.env.NODE_ENV !== 'test') {
-  server.listen(config.port, () => {
+  if (config.isProduction && !config.proxyApiKey) {
+    logger.error('CRITICAL SECURITY ERROR: PROXY_API_KEY must be configured when running in production mode (NODE_ENV=production).');
+    process.exit(1);
+  }
+
+  server.listen(config.port, config.host, () => {
     console.log(banner);
-    logger.success(`Server listening on port ${config.port} (IPv4 & IPv6 dual-stack)`);
+    logger.success(`Server listening on ${config.host}:${config.port} (IPv4 & IPv6 dual-stack)`);
   });
 
   const handleTermination = async (signal) => {

@@ -6,7 +6,7 @@ import { modelRegistry } from '../providers/index.js';
  * Omits synthetic/legacy aliases from public advertisement.
  */
 export function listModels(req, res) {
-  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: true, includeSynthetic: false });
+  const models = modelRegistry.listModels({ availableOnly: false, includeAliases: false, includeSynthetic: false });
   res.json({
     object: 'list',
     data: models

@@ -6,7 +6,7 @@
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-412991?logo=openai)](https://platform.openai.com/docs/api-reference)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://modelcontextprotocol.io/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek--Harness-Compatible-success)](https://github.com/DeepSeek-ai/deepseek-harness)
-[![Tests Passing](https://img.shields.io/badge/Tests-133%2F133%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-147%2F147%20Passing-brightgreen.svg)](tests/)
 [![Author](https://img.shields.io/badge/Author-Lemo-orange.svg)](#author--credits)
 
 > **Architected by Lemo**  
@@ -14,7 +14,9 @@
 >
 > **Scope & Capabilities Note:**  
 > - **Gemini Web Only**: The upstream provider is Google Gemini Web exclusively. Foreign models (`gpt-*`, `claude-*`, `deepseek-*`) fail closed with HTTP 404 (`model_not_found`).  
-> - **Pure Text Generation**: Multimodal and image inputs (Base64 data URIs, image URLs, attachment parts) are strictly rejected with HTTP 400 (`image_input_unsupported`). All vision claims and processing logic are removed.
+> - **Pure Text Generation**: Text referencing image URLs (e.g. `https://example.com/logo.png`), CSS styles, HTML tags, and file paths is accepted cleanly. Actual image payloads (Base64 data URIs, markdown image tags `![alt](url)`, structured image objects) are strictly rejected with HTTP 400 (`image_input_unsupported` or `unsupported_content_type`). All vision processing logic has been permanently removed.
+> - **No Silent Model Downgrades**: Quota exhaustion on Pro or Thinking models fails closed with HTTP 429 (`insufficient_quota`) rather than silently downgrading to Flash.
+> - **Production Security**: When `NODE_ENV=production`, `PROXY_API_KEY` is mandatory (server refuses unauthenticated startup or returns 500 `missing_production_api_key`). Default host in development binds safely to `127.0.0.1`.
 
 ---
 
@@ -56,15 +58,16 @@
 
 ## 📋 Model Catalog
 
-| Model ID | Description | Reasoning Stream | Best For |
-| :--- | :--- | :---: | :--- |
-| `gemini-flash` | Google Gemini 2.5 Flash / Gemini 3 Flash | No | Fast everyday coding, completions, DeepSeek Harness |
-| `gemini-2.5-flash` | Google Gemini 2.5 Flash Flagship Speed Alias | No | High throughput, quick responses |
-| `gemini-pro` | Google Gemini 2.5 Pro / Gemini 3 Pro | No | Complex problem solving, architectural planning |
-| `gemini-2.5-pro` | Google Gemini 2.5 Pro Alias | No | In-depth refactoring, multi-file analysis |
-| `gemini-thinking` | Google Gemini Thinking Model | ✅ Yes | Deep mathematical, algorithmic, and code reasoning |
-| `gemini-2.5-thinking` | Google Gemini 2.5 Thinking | ✅ Yes | Advanced reasoning with live thought tokens |
-| `gemini-lite` | Google Gemini Lite | No | Lightweight tasks and minimal latency |
+The proxy exposes neutral, truthful canonical model IDs in `/v1/models` representing Gemini Web capabilities:
+
+| Model ID | Canonical Name | Upstream Web Model | Reasoning Stream | Best For |
+| :--- | :--- | :--- | :---: | :--- |
+| `gemini-flash` | Google Gemini Flash | `gemini-3-flash` | No | Fast everyday coding, completions, DeepSeek Harness |
+| `gemini-pro` | Google Gemini Pro | `gemini-3-pro` | No | Complex problem solving, architectural planning |
+| `gemini-thinking` | Google Gemini Thinking | `gemini-3-thinking` | ✅ Yes | Deep mathematical, algorithmic, and code reasoning |
+| `gemini-lite` | Google Gemini Lite | `gemini-3-lite` | No | Lightweight tasks and minimal latency |
+
+*Note: Backwards compatibility aliases (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-thinking`) are fully supported for incoming requests and seamlessly resolve to their respective canonical models.*
 
 ---
 
@@ -201,10 +204,11 @@ cp env.example .env
 Configure your `.env`:
 ```env
 PORT=3000
-HOST=0.0.0.0
+# Default host is 127.0.0.1 (local only) in development; set to 0.0.0.0 for public/container interfaces
+HOST=127.0.0.1
 DEFAULT_MODEL=gemini-flash
 
-# Optional: Proxy API Key (if set, clients must send Authorization: Bearer <key>)
+# Proxy API Key: Optional in development (warns on open access); MANDATORY in production (NODE_ENV=production)
 PROXY_API_KEY=
 
 # Optional: Gemini Account Mode cookie (leave blank for Anonymous Guest Mode)
@@ -222,20 +226,20 @@ WORKSPACE_ROOT=
 
 ### 4. Running the Server
 ```bash
-# Start in production mode
+# Start in production mode (requires PROXY_API_KEY)
 npm start
 
-# Start in development mode with auto-reload
+# Start in development mode with auto-reload (binds to 127.0.0.1)
 npm run dev
 ```
 
-The server starts on `http://localhost:3000`.
-- **Developer Dashboard**: `http://localhost:3000/dashboard`
-- **Health Check**: `http://localhost:3000/healthz`
-- **Models List**: `http://localhost:3000/v1/models`
+The server starts on `http://127.0.0.1:3000`.
+- **Developer Dashboard**: `http://127.0.0.1:3000/dashboard`
+- **Health Check**: `http://127.0.0.1:3000/healthz`
+- **Models List**: `http://127.0.0.1:3000/v1/models`
 
 ### 5. Running the Test Suite
-Run the full automated test suite (133 tests):
+Run the full automated test suite (147 tests):
 ```bash
 npm test
 ```

@@ -5,24 +5,7 @@ import { logger } from '../utils/logger.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
-
-/**
- * Checks if a value contains image content.
- * @param {*} value
- * @returns {boolean}
- */
-function isImageContent(value) {
-  if (!value) return false;
-  if (typeof value === 'string') {
-    return value.includes('data:image/') || /^data:image\/[a-zA-Z0-9.+_-]+;base64,/i.test(value.trim());
-  }
-  if (typeof value === 'object') {
-    if (value.type === 'image_url' || value.type === 'image' || value.image_url || value.image) {
-      return true;
-    }
-  }
-  return false;
-}
+import { validateResponsesInput } from '../utils/textOnlyValidator.js';
 
 /**
  * POST /v1/responses
@@ -61,46 +44,10 @@ export async function handleResponses(req, res) {
     });
   }
 
-  // Reject image or multimodal inputs
-  if (isImageContent(input)) {
-    return res.status(400).json({
-      error: {
-        message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
-        type: 'invalid_request_error',
-        param: 'input',
-        code: 'image_input_unsupported'
-      }
-    });
-  }
-
-  if (Array.isArray(input)) {
-    for (let idx = 0; idx < input.length; idx++) {
-      const item = input[idx];
-      if (isImageContent(item)) {
-        return res.status(400).json({
-          error: {
-            message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
-            type: 'invalid_request_error',
-            param: `input[${idx}]`,
-            code: 'image_input_unsupported'
-          }
-        });
-      }
-      if (item && typeof item === 'object' && Array.isArray(item.content)) {
-        for (let cIdx = 0; cIdx < item.content.length; cIdx++) {
-          if (isImageContent(item.content[cIdx])) {
-            return res.status(400).json({
-              error: {
-                message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
-                type: 'invalid_request_error',
-                param: `input[${idx}].content[${cIdx}]`,
-                code: 'image_input_unsupported'
-              }
-            });
-          }
-        }
-      }
-    }
+  // Reject image or multimodal inputs using shared textOnlyValidator
+  const inputErr = validateResponsesInput(input, 'input');
+  if (inputErr) {
+    return res.status(inputErr.status).json(inputErr.body);
   }
 
   const messages = [];
