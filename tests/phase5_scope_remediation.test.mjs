@@ -239,7 +239,7 @@ test('FINDING 50F1-03: GeminiEngine allows guest fallback ONLY for BASIC_FLASH o
       model: 'gemini-pro',
       messages: [{ role: 'user', content: 'Complex reasoning query' }]
     });
-    for await (const _ of generator) {}
+    for await (const _ of generator) { }
   } catch (err) {
     caughtError = err;
   }
@@ -257,7 +257,7 @@ test('FINDING 50F1-03: GeminiEngine allows guest fallback ONLY for BASIC_FLASH o
       model: 'gemini-thinking',
       messages: [{ role: 'user', content: 'Deep thinking query' }]
     });
-    for await (const _ of generator) {}
+    for await (const _ of generator) { }
   } catch (err) {
     caughtThinkingError = err;
   }
@@ -384,7 +384,7 @@ test('FINDING 50F1-05: Misleading 2.5 aliases are removed and fail closed with 4
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Markdown Text Acceptance vs Rejection Matrix (PHASE 5.0F.2.1)
+// 6. Markdown Text Acceptance vs Rejection Matrix (PHASE 5.0F.2.1 & 5.0F.2.2)
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('PHASE 5.0F.2.1: Markdown image syntax in text is accepted while raw payloads are rejected', () => {
@@ -393,10 +393,15 @@ test('PHASE 5.0F.2.1: Markdown image syntax in text is accepted while raw payloa
     'Explain this Markdown image syntax: ![alt](https://example.com/image.png)',
     'Why does ![logo](logo.png) not render?',
     '```markdown\n![alt](https://example.com/image.png)\n```',
+    '```\n![alt](https://example.com/image.png)\n```',
     'Text explaining how Markdown image embedding works: use ![alt](url) format.',
     '`![alt](https://example.com/image.png)`',
     '"![alt](https://example.com/image.png)"',
-    'Here is an example in docs: ![photo](https://example.com/photo.jpg)'
+    'The syntax "![alt text](url)" is standard Markdown',
+    'Here is an example in docs: ![photo](https://example.com/photo.jpg)',
+    'In CSS: background: url("bg.png"); differs from markdown ![bg](bg.png)',
+    'HTML uses <img src="logo.png"> whereas Markdown uses ![logo](logo.png)',
+    'Check out https://example.com/image.png for the diagram.'
   ];
 
   for (const text of acceptedCases) {
@@ -408,6 +413,7 @@ test('PHASE 5.0F.2.1: Markdown image syntax in text is accepted while raw payloa
   // Required rejection cases: raw standalone attachment tags, base64 payloads, and structured objects
   const rejectedCases = [
     '![alt](https://example.com/image.png)',
+    '   ![alt](https://example.com/image.png)   \n',
     '![logo](logo.png)',
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     'Explain this: ![alt](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==)',
@@ -420,7 +426,7 @@ test('PHASE 5.0F.2.1: Markdown image syntax in text is accepted while raw payloa
   }
 });
 
-test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discussion text', async () => {
+test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discussion text and code blocks', async () => {
   // 1. /v1/chat/completions accepts markdown discussion
   const chatRes = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
@@ -437,7 +443,23 @@ test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discu
     assert.notEqual(data.error?.code, 'image_input_unsupported');
   }
 
-  // 2. /v1/responses accepts markdown discussion
+  // 2. /v1/chat/completions accepts fenced code block containing markdown image
+  const chatCodeRes = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        { role: 'user', content: '```markdown\n![alt](https://example.com/image.png)\n```' }
+      ]
+    })
+  });
+  if (chatCodeRes.status === 400) {
+    const data = await chatCodeRes.json();
+    assert.notEqual(data.error?.code, 'image_input_unsupported');
+  }
+
+  // 3. /v1/responses accepts markdown discussion
   const respRes = await fetch(`${baseUrl}/v1/responses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -451,7 +473,7 @@ test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discu
     assert.notEqual(data.error?.code, 'image_input_unsupported');
   }
 
-  // 3. /v1/chat/completions rejects standalone markdown image attachment
+  // 4. /v1/chat/completions rejects standalone markdown image attachment
   const rejectRes = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -465,6 +487,19 @@ test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discu
   assert.equal(rejectRes.status, 400);
   const rejectData = await rejectRes.json();
   assert.equal(rejectData.error.code, 'image_input_unsupported');
+
+  // 5. /v1/responses rejects standalone markdown image attachment
+  const rejectRespRes = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      input: '![alt](https://example.com/image.png)'
+    })
+  });
+  assert.equal(rejectRespRes.status, 400);
+  const rejectRespData = await rejectRespRes.json();
+  assert.equal(rejectRespData.error.code, 'image_input_unsupported');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -484,7 +519,7 @@ test('PHASE 5.0F.2.1: Guest Mode fallback invokes SDK with exact Model.BASIC_FLA
         }
       };
     },
-    close: async () => {}
+    close: async () => { }
   };
 
   engine.createGuestClient = () => mockGuestClient;
@@ -524,7 +559,7 @@ test('PHASE 5.0F.2.1: Guest Mode fallback invokes SDK with exact Model.BASIC_FLA
       signal: null,
       err: flashLimitError
     });
-    for await (const _ of proGenerator) {}
+    for await (const _ of proGenerator) { }
   } catch (err) {
     proCaught = err;
   }
@@ -544,7 +579,7 @@ test('PHASE 5.0F.2.1: Guest Mode fallback invokes SDK with exact Model.BASIC_FLA
       signal: null,
       err: flashLimitError
     });
-    for await (const _ of thinkingGenerator) {}
+    for await (const _ of thinkingGenerator) { }
   } catch (err) {
     thinkingCaught = err;
   }
