@@ -80,7 +80,7 @@ export class ModelRouter {
             upstreamModelId: cleanModelId,
             capabilities: typeof p.getCapabilities === 'function'
               ? p.getCapabilities(cleanModelId)
-              : { chat: true, stream: true, tools: true, vision: false, json: false, reasoning: false, responses: true },
+              : { chat: true, stream: true, tools: true, json: false, reasoning: false, responses: true },
             isAvailable: true
           };
           break;
@@ -93,14 +93,14 @@ export class ModelRouter {
       // Check if the model prefix belongs to a known foreign provider without an installed adapter
       const lower = cleanModelId.toLowerCase();
       const foreignPrefixes = ['gpt-', 'o1-', 'o3-', 'deepseek-', 'claude-'];
-      const isForeign = foreignPrefixes.some(prefix => lower.startsWith(prefix));
+      const isForeign = lower === 'o1' || lower === 'o3' || foreignPrefixes.some(prefix => lower.startsWith(prefix));
 
       if (isForeign) {
         logger.warn(
           `[ModelRouter] Request for model '${cleanModelId}' rejected: Provider adapter is not installed and fallback is disabled.`
         );
         const err = new Error(
-          `The model '${cleanModelId}' belongs to an unconfigured provider. Native provider adapter is not installed and cross-provider fallback is disabled.`
+          `The model '${cleanModelId}' belongs to an unconfigured provider. This proxy exclusively supports Google Gemini Web models.`
         );
         err.status = 404;
         err.code = 'model_not_found';

@@ -274,10 +274,10 @@ test('GeminiProvider: implements ProviderAdapter interface correctly', () => {
   assert.equal(gemini.supportsModel('gemini-pro'), true);
   assert.equal(gemini.supportsModel('non-gemini-model'), false);
 
-  // Test capabilities
+  // Test capabilities (vision disabled for text-only proxy)
   const flashCaps = gemini.getCapabilities('gemini-flash');
   assert.equal(flashCaps.tools, true);
-  assert.equal(flashCaps.vision, true);
+  assert.notEqual(flashCaps.vision, true);
 
   const thinkCaps = gemini.getCapabilities('gemini-thinking');
   assert.equal(thinkCaps.tools, false);

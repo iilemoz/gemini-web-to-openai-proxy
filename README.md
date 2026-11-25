@@ -6,20 +6,25 @@
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-412991?logo=openai)](https://platform.openai.com/docs/api-reference)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://modelcontextprotocol.io/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek--Harness-Compatible-success)](https://github.com/DeepSeek-ai/deepseek-harness)
-[![Tests Passing](https://img.shields.io/badge/Tests-54%2F54%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-133%2F133%20Passing-brightgreen.svg)](tests/)
 [![Author](https://img.shields.io/badge/Author-Lemo-orange.svg)](#author--credits)
 
 > **Architected by Lemo**  
-> An enterprise-grade, modular, pure HTTP OpenAI-compatible AI Agent Infrastructure. Bridges **Google Gemini Web** to OpenAI API endpoints (`/v1/chat/completions`, `/v1/models`, `/v1/responses`), features a **Universal Tool Calling Engine**, **Autonomous Agent Orchestrator**, **Local Agent Runtime** (WebSocket secure tunneling), **Cloud Isolation Runtime** (Docker + Process fallback), **Model Context Protocol (MCP)** server/client, **Persistent Fact Memory**, **Multi-Agent Pipeline Coordinator**, and a real-time **Developer Admin Dashboard**. Fully benchmark-verified against the **DeepSeek AI Harness**.
+> An enterprise-grade, modular, pure HTTP OpenAI-compatible AI Agent Infrastructure. Exclusively bridges **Google Gemini Web** to OpenAI API endpoints (`/v1/chat/completions`, `/v1/models`, `/v1/responses`) with **pure text-based processing**. Features a **Universal Tool Calling Engine**, **Autonomous Agent Orchestrator**, **Local Agent Runtime** (WebSocket secure tunneling), **Cloud Isolation Runtime** (Docker + Process fallback), **Model Context Protocol (MCP)** server/client, **Persistent Fact Memory**, **Multi-Agent Pipeline Coordinator**, and a real-time **Developer Admin Dashboard**. Fully benchmark-verified against the **DeepSeek AI Harness**.
+>
+> **Scope & Capabilities Note:**  
+> - **Gemini Web Only**: The upstream provider is Google Gemini Web exclusively. Foreign models (`gpt-*`, `claude-*`, `deepseek-*`) fail closed with HTTP 404 (`model_not_found`).  
+> - **Pure Text Generation**: Multimodal and image inputs (Base64 data URIs, image URLs, attachment parts) are strictly rejected with HTTP 400 (`image_input_unsupported`). All vision claims and processing logic are removed.
 
 ---
 
 ## 🌟 Key Subsystems & Highlights
 
-- **⚡ 100% Pure HTTP Gemini Web Bridge**:
+- **⚡ 100% Pure HTTP Gemini Web Bridge (Text-Only)**:
   - Direct HTTP streaming via `gemini-web-sdk` 2.3.0.
   - Zero Puppeteer, Playwright, or headless browser requirements.
   - No CAPTCHAs, low latency, and zero display server dependencies.
+  - Dedicated text-only pipeline with stop sequence truncation filter.
 - **👥 Dual Gemini Operational Modes**:
   - **Guest Mode (Default)**: Fully anonymous, instant out-of-the-box usage with zero API keys or cookies.
   - **Account Mode**: Pass `__Secure-1PSID` / `__Secure-1PSIDTS` via `.env` or client `Authorization: Bearer <cookie>` to access user quotas and advanced capabilities.
@@ -230,7 +235,7 @@ The server starts on `http://localhost:3000`.
 - **Models List**: `http://localhost:3000/v1/models`
 
 ### 5. Running the Test Suite
-Run all 54 automated deterministic tests across all 10 phases:
+Run the full automated test suite (133 tests):
 ```bash
 npm test
 ```

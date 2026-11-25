@@ -5,11 +5,28 @@ import { logger } from '../utils/logger.js';
 import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
-import { hasMultimodalContent } from '../utils/multimodal.js';
+
+/**
+ * Checks if a value contains image content.
+ * @param {*} value
+ * @returns {boolean}
+ */
+function isImageContent(value) {
+  if (!value) return false;
+  if (typeof value === 'string') {
+    return value.includes('data:image/') || /^data:image\/[a-zA-Z0-9.+_-]+;base64,/i.test(value.trim());
+  }
+  if (typeof value === 'object') {
+    if (value.type === 'image_url' || value.type === 'image' || value.image_url || value.image) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * POST /v1/responses
- * OpenAI Responses API specification endpoint.
+ * OpenAI Responses API specification endpoint (text-only emulation for Google Gemini Web).
  * Accepts: { model, input: string | array, instructions?: string, tools?: array }
  */
 export async function handleResponses(req, res) {
@@ -17,8 +34,21 @@ export async function handleResponses(req, res) {
     model = config.defaultModel,
     input,
     instructions = '',
-    tools = []
+    tools = [],
+    stream = false
   } = req.body || {};
+
+  // Reject unsupported streaming in /v1/responses emulation
+  if (stream === true) {
+    return res.status(400).json({
+      error: {
+        message: 'Streaming is not currently supported for /v1/responses emulation.',
+        type: 'invalid_request_error',
+        param: 'stream',
+        code: 'streaming_not_supported'
+      }
+    });
+  }
 
   if (!input) {
     return res.status(400).json({
@@ -29,6 +59,48 @@ export async function handleResponses(req, res) {
         code: 'missing_input'
       }
     });
+  }
+
+  // Reject image or multimodal inputs
+  if (isImageContent(input)) {
+    return res.status(400).json({
+      error: {
+        message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
+        type: 'invalid_request_error',
+        param: 'input',
+        code: 'image_input_unsupported'
+      }
+    });
+  }
+
+  if (Array.isArray(input)) {
+    for (let idx = 0; idx < input.length; idx++) {
+      const item = input[idx];
+      if (isImageContent(item)) {
+        return res.status(400).json({
+          error: {
+            message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
+            type: 'invalid_request_error',
+            param: `input[${idx}]`,
+            code: 'image_input_unsupported'
+          }
+        });
+      }
+      if (item && typeof item === 'object' && Array.isArray(item.content)) {
+        for (let cIdx = 0; cIdx < item.content.length; cIdx++) {
+          if (isImageContent(item.content[cIdx])) {
+            return res.status(400).json({
+              error: {
+                message: 'Image and multimodal inputs are not supported. This proxy only accepts text-based requests.',
+                type: 'invalid_request_error',
+                param: `input[${idx}].content[${cIdx}]`,
+                code: 'image_input_unsupported'
+              }
+            });
+          }
+        }
+      }
+    }
   }
 
   const messages = [];
@@ -54,29 +126,12 @@ export async function handleResponses(req, res) {
   }
 
   const token = req.geminiCookie || null;
-  const hasImages = hasMultimodalContent(messages);
   const requiredCapabilities = ['responses'];
-  if (hasImages) {
-    requiredCapabilities.push('vision');
-  }
   
   // ── Resolve Provider via ModelRouter ──────────────────────────────────────
   let provider;
   if (registry._mockDefaultProvider) {
     provider = registry._mockDefaultProvider;
-    if (hasImages && typeof provider.getCapabilities === 'function') {
-      const caps = provider.getCapabilities(model);
-      if (caps && caps.vision === false) {
-        return res.status(400).json({
-          error: {
-            message: `Model '${model}' does not support the 'vision' capability.`,
-            type:    'invalid_request_error',
-            code:    'capability_not_supported',
-            param:   'vision'
-          }
-        });
-      }
-    }
   } else {
     try {
       const resolution = modelRouter.resolve(model, {
@@ -96,7 +151,6 @@ export async function handleResponses(req, res) {
   }
 
   const responseId = `resp-${crypto.randomUUID()}`;
-
   const abortController = new AbortController();
   const { signal } = abortController;
 
@@ -148,8 +202,7 @@ export async function handleResponses(req, res) {
           content += text;
         }
 
-        const isGemini = provider.id === 'gemini' || provider.name === 'gemini';
-        if (isGemini && isUpstreamErrorText(content)) {
+        if (isUpstreamErrorText(content)) {
           logger.warn(`[Responses API] Upstream Gemini returned internal error text: "${content}"`);
           const err = new Error(`Upstream model error: ${content}`);
           err.status = 502;

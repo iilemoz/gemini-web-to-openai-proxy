@@ -99,7 +99,6 @@ export class ModelRegistry {
         chat: true,
         stream: true,
         tools: true,
-        vision: false,
         json: false,
         reasoning: false,
         responses: true,

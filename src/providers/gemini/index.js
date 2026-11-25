@@ -5,7 +5,7 @@ import { logger } from '../../utils/logger.js';
 /**
  * Google Gemini Provider Adapter.
  * Integrates Google Gemini Web (Guest & Account Modes) into the unified provider architecture.
- * Delegates actual HTTP streaming and token generation to GeminiEngine.
+ * Exclusively provides text-based completions via GeminiEngine.
  */
 export class GeminiProvider extends BaseProvider {
   constructor() {
@@ -39,7 +39,7 @@ export class GeminiProvider extends BaseProvider {
   }
 
   /**
-   * Returns models natively hosted by Gemini provider.
+   * Returns models natively hosted by Gemini Web provider.
    */
   getModels() {
     return [
@@ -53,7 +53,6 @@ export class GeminiProvider extends BaseProvider {
           chat: true,
           stream: true,
           tools: true,
-          vision: true,
           json: true,
           reasoning: false,
           responses: true
@@ -69,7 +68,6 @@ export class GeminiProvider extends BaseProvider {
           chat: true,
           stream: true,
           tools: true,
-          vision: true,
           json: true,
           reasoning: false,
           responses: true
@@ -85,7 +83,6 @@ export class GeminiProvider extends BaseProvider {
           chat: true,
           stream: true,
           tools: false,
-          vision: false,
           json: false,
           reasoning: true,
           responses: true
@@ -101,7 +98,6 @@ export class GeminiProvider extends BaseProvider {
           chat: true,
           stream: true,
           tools: false,
-          vision: false,
           json: false,
           reasoning: false,
           responses: true
@@ -138,7 +134,6 @@ export class GeminiProvider extends BaseProvider {
         chat: true,
         stream: true,
         tools: false,
-        vision: false,
         json: false,
         reasoning: false,
         responses: true
@@ -164,7 +159,6 @@ export class GeminiProvider extends BaseProvider {
       chat: true,
       stream: true,
       tools: !isThinking && !isLite,
-      vision: !isThinking && !isLite,
       json: !isThinking && !isLite,
       reasoning: isThinking,
       responses: true

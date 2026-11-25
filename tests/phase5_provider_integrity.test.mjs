@@ -414,7 +414,7 @@ test('PHASE 5.0A: HTTP Integration - POST /v1/chat/completions fails closed on u
     assert.equal(body3.error.code, 'capability_not_supported');
     assert.equal(body3.error.param, 'tools');
 
-    // 4. Capability violation: requesting vision on gemini-thinking returns 400 capability_not_supported
+    // 4. Multimodal rejection: sending image content returns 400 image_input_unsupported
     const res4 = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -431,8 +431,7 @@ test('PHASE 5.0A: HTTP Integration - POST /v1/chat/completions fails closed on u
     });
     assert.equal(res4.status, 400);
     const body4 = await res4.json();
-    assert.equal(body4.error.code, 'capability_not_supported');
-    assert.equal(body4.error.param, 'vision');
+    assert.equal(body4.error.code, 'image_input_unsupported');
   } finally {
     server.close();
   }

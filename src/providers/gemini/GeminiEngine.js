@@ -1,11 +1,11 @@
 import { Gemini, Model } from 'gemini-web-sdk';
 import { logger } from '../../utils/logger.js';
 import { config } from '../../config/index.js';
-import { formatContentToPromptText, extractHttpImageUrls } from '../../utils/multimodal.js';
 
 /**
  * Engine for Google Gemini Web (Guest & Account Modes).
  * Operates purely via HTTP requests with no browser or Puppeteer.
+ * Text-only input and output.
  */
 export class GeminiEngine {
   constructor() {
@@ -32,8 +32,6 @@ export class GeminiEngine {
     let secure1psid = envPsid;
 
     // Only treat the token as a Google cookie if it looks like one
-    // (starts with 'g.a.' or is a very long string). This prevents
-    // dummy API keys like 'sk-...' from being mistaken for cookies.
     if (!secure1psid && token) {
       if (token.startsWith('g.a.') || token.includes('__Secure-1PSID') || token.length > 60) {
         secure1psid = token.replace(/.*?__Secure-1PSID=([^;]+).*/, '$1').trim();
@@ -62,8 +60,6 @@ export class GeminiEngine {
     }
 
     // ── Guest Mode ────────────────────────────────────────────────────────────
-    // A fresh client is created per request to prevent session-cookie cross-talk.
-    // isTemporary = true signals the caller to close() it when done.
     const guestOptions = { autoClose: false };
     if (config.upstreamProxy) guestOptions.proxy = config.upstreamProxy;
     return {
@@ -145,13 +141,21 @@ Instructions for tool calling:
    * Formats a single message's content into a plain text string for the prompt.
    * Handles:
    *   - Plain string content.
-   *   - Content arrays with 'text' and 'image_url' parts (Vision / multimodal).
+   *   - Content arrays with 'text' parts.
    *   - Assistant messages carrying previous tool_calls.
    * @param {Object} msg
    * @returns {string}
    */
   formatMessageContent(msg) {
-    let text = formatContentToPromptText(msg.content);
+    let text = '';
+    if (typeof msg.content === 'string') {
+      text = msg.content;
+    } else if (Array.isArray(msg.content)) {
+      text = msg.content
+        .map(p => (typeof p === 'string' ? p : p?.text || ''))
+        .filter(Boolean)
+        .join('\n');
+    }
 
     // If the assistant message carries previous tool_calls, replay them so the
     // model understands the conversation history.
@@ -170,21 +174,10 @@ Instructions for tool calling:
   }
 
   /**
-   * Extracts all http(s) image URLs from an OpenAI messages array.
-   * These are passed to generateContentStream() as `files` for Vision support.
-   * Base64 data URIs are excluded because gemini-web-sdk expects URL strings.
-   * @param {Array<Object>} messages
-   * @returns {string[]}
-   */
-  extractImages(messages) {
-    return extractHttpImageUrls(messages);
-  }
-
-  /**
    * Formats an OpenAI messages array into a single prompt string consumed by
    * the Gemini Web SDK. System messages are hoisted to the top; conversation
    * turns follow in User / Model / Tool Result order.
-   * @param {Array<{role: string, content: string}>} messages
+   * @param {Array<{role: string, content: string|Array}>} messages
    * @param {Array<Object>} [tools]
    * @returns {string}
    */
@@ -239,7 +232,7 @@ Instructions for tool calling:
   // ---------------------------------------------------------------------------
 
   /**
-   * Streams a chat completion from Google Gemini Web.
+   * Streams a text chat completion from Google Gemini Web.
    *
    * Yields:
    *   { type: 'thinking', text: string }  – reasoning / thinking tokens
@@ -263,7 +256,6 @@ Instructions for tool calling:
     const { client, isTemporary } = this.getClient(token);
     const resolvedModel = this.resolveModel(model);
     const prompt = this.formatPrompt(messages, tools);
-    const images = this.extractImages(messages);
 
     if (!prompt) {
       logger.warn('[GeminiEngine] Prompt is empty after filtering messages.');
@@ -273,14 +265,10 @@ Instructions for tool calling:
     const isGuest = isTemporary;
     logger.info(
       `[GeminiEngine] Starting chat | Mode: ${isGuest ? 'Guest (Anonymous)' : 'Account'} | ` +
-      `Model: ${resolvedModel.model_name} | Images: ${images.length}`
+      `Model: ${resolvedModel.model_name}`
     );
 
-    // Build SDK options
-    const generateOpts = {
-      prompt,
-      ...(images.length > 0 ? { files: images } : {})
-    };
+    const generateOpts = { prompt };
 
     let hasYieldedContent = false;
     let chat;
@@ -337,7 +325,7 @@ Instructions for tool calling:
       }
 
     } catch (err) {
-      // ── Account plan limit → seamless Guest Mode fallback ─────────────────
+      // Account plan limit → seamless Guest Mode fallback
       const isLimitErr =
         !isGuest && (
           err.name === 'UsageLimitExceeded' ||
@@ -372,7 +360,6 @@ Instructions for tool calling:
             }
           }
         } finally {
-          // Always close the temporary fallback guest client
           guestClient.close().catch(() => {});
         }
 
@@ -396,7 +383,6 @@ Instructions for tool calling:
         }
       }
 
-      // Always close temporary Guest Mode clients to free HTTP sockets and timers
       if (isTemporary) {
         client.close().catch(() => {});
       }

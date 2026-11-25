@@ -13,10 +13,9 @@ import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
 import {
-  hasMultimodalContent,
   applyStopSequences,
   createStreamingStopFilter
-} from '../utils/multimodal.js';
+} from '../utils/stopSequences.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,9 +33,12 @@ function estimateTokens(text = '') {
  */
 function estimatePromptTokens(messages) {
   return messages.reduce((total, m) => {
-    const content = typeof m.content === 'string'
-      ? m.content
-      : JSON.stringify(m.content || '');
+    let content = '';
+    if (typeof m.content === 'string') {
+      content = m.content;
+    } else if (Array.isArray(m.content)) {
+      content = m.content.map(p => (typeof p === 'string' ? p : p?.text || '')).join(' ');
+    }
     return total + estimateTokens(content);
   }, 0) || 10;
 }
@@ -47,7 +49,7 @@ function estimatePromptTokens(messages) {
 
 /**
  * POST /v1/chat/completions
- * OpenAI-compatible chat completion endpoint.
+ * OpenAI-compatible text chat completion endpoint for Google Gemini Web.
  *
  * Key behaviours:
  *  - Streams via SSE when `stream: true`; returns a single JSON object otherwise.
@@ -97,7 +99,6 @@ export async function handleChatCompletion(req, res) {
   // ── Feature flags and capabilities ─────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
   const hasTools      = effectiveTools.length > 0;
-  const hasImages     = hasMultimodalContent(messages);
   const isJsonFormat  = Boolean(
     req.body.response_format &&
     (req.body.response_format.type === 'json_object' || req.body.response_format.type === 'json_schema')
@@ -105,7 +106,6 @@ export async function handleChatCompletion(req, res) {
 
   const requiredCapabilities = [];
   if (hasTools) requiredCapabilities.push('tools');
-  if (hasImages) requiredCapabilities.push('vision');
   if (isJsonFormat) requiredCapabilities.push('json');
   if (stream) requiredCapabilities.push('stream');
 
@@ -113,19 +113,6 @@ export async function handleChatCompletion(req, res) {
   let provider;
   if (registry._mockDefaultProvider) {
     provider = registry._mockDefaultProvider;
-    if (hasImages && typeof provider.getCapabilities === 'function') {
-      const caps = provider.getCapabilities(model);
-      if (caps && caps.vision === false) {
-        return res.status(400).json({
-          error: {
-            message: `Model '${model}' does not support the 'vision' capability.`,
-            type:    'invalid_request_error',
-            code:    'capability_not_supported',
-            param:   'vision'
-          }
-        });
-      }
-    }
   } else {
     try {
       const resolution = modelRouter.resolve(model, {
@@ -231,7 +218,7 @@ export async function handleChatCompletion(req, res) {
       const toolTagRegex = /(?:[<＜]\s*[|｜]\s*(?:[|｜]\s*)?DSML\s*[|｜]\s*(?:[|｜]\s*)?calls|<tool_call>)/i;
 
       let chunkCount        = 0;
-      let completionChars   = 0;  // accumulated for usage tracking
+      let completionChars   = 0;
       let inDsmlMode        = false;
       let dsmlBuffer        = '';
       let pendingContent    = '';
@@ -247,13 +234,12 @@ export async function handleChatCompletion(req, res) {
 
       for await (const rawChunk of generator) {
         resetIdleTimer();
-        // Generator has already stopped if signal was aborted
         if (!rawChunk) continue;
 
         const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
         const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
 
-        // ── Native tool calls from provider ─────────────────────────────────
+        // Native tool calls from provider
         if (chunkType === 'tool_calls') {
           res.write(formatSSEChunk(completionId, model, { tool_calls: rawChunk.tool_calls }));
           chunkCount++;
@@ -261,7 +247,7 @@ export async function handleChatCompletion(req, res) {
           continue;
         }
 
-        // ── Native usage from provider ──────────────────────────────────────
+        // Native usage from provider
         if (chunkType === 'usage') {
           upstreamUsage = rawChunk.usage;
           continue;
@@ -269,7 +255,7 @@ export async function handleChatCompletion(req, res) {
 
         if (!chunkText) continue;
 
-        // ── Thinking / reasoning tokens ─────────────────────────────────────
+        // Thinking / reasoning tokens
         if (chunkType === 'thinking') {
           completionChars += chunkText.length;
           res.write(formatSSEChunk(completionId, model, { reasoning_content: chunkText }));
@@ -279,8 +265,8 @@ export async function handleChatCompletion(req, res) {
 
         completionChars += chunkText.length;
 
-        // ── No tools or non-Gemini provider → pass through directly (fastest path) ───
-        if (!hasTools || (provider.id !== 'gemini' && provider.name !== 'gemini')) {
+        // Direct path when no tools are present
+        if (!hasTools) {
           stopFilter.push(chunkText);
           if (stopFilter.isStopped()) {
             break;
@@ -288,7 +274,7 @@ export async function handleChatCompletion(req, res) {
           continue;
         }
 
-        // ── Tool-aware buffering: watch for <tool_call> / DSML blocks ────────
+        // Tool-aware buffering: watch for <tool_call> / DSML blocks
         if (inDsmlMode) {
           dsmlBuffer += chunkText;
         } else {
@@ -296,7 +282,6 @@ export async function handleChatCompletion(req, res) {
 
           const match = pendingContent.match(toolTagRegex);
           if (match) {
-            // Switch into DSML capture mode
             inDsmlMode = true;
             const beforeText = pendingContent.slice(0, match.index);
             if (beforeText) {
@@ -308,7 +293,7 @@ export async function handleChatCompletion(req, res) {
             dsmlBuffer    = pendingContent.slice(match.index);
             pendingContent = '';
           } else {
-            // Buffer the tail if it might be the start of '<tool_call' or '< | DSML'
+            // Buffer the tail if it might be the start of '<tool_call'
             const lastLt = pendingContent.search(/[<＜][^<＜]*$/);
             if (lastLt !== -1 && pendingContent.length - lastLt < 20) {
               const safeText = pendingContent.slice(0, lastLt);
@@ -332,13 +317,13 @@ export async function handleChatCompletion(req, res) {
 
       if (idleTimer) clearTimeout(idleTimer);
 
-      // ── Flush any remaining plain-text buffer ──────────────────────────────
+      // Flush any remaining plain-text buffer
       if (pendingContent && !stopFilter.isStopped()) {
         stopFilter.push(pendingContent);
       }
       stopFilter.flush();
 
-      // ── Emit parsed tool calls (or stop) ──────────────────────────────────
+      // Emit parsed tool calls (or stop)
       if (stopFilter.isStopped()) {
         res.write(formatSSEChunk(completionId, model, {}, 'stop'));
       } else if (hasNativeToolCalls) {
@@ -351,47 +336,34 @@ export async function handleChatCompletion(req, res) {
         }
 
         if (toolCalls && toolCalls.length > 0) {
-          logger.info(`Emitting ${toolCalls.length} parsed tool call(s) to client`);
-          const streamingToolCalls = toolCalls.map((tc, idx) => ({
-            index:    idx,
-            id:       tc.id,
-            type:     tc.type || 'function',
-            function: tc.function
-          }));
-          res.write(formatSSEChunk(completionId, model, { tool_calls: streamingToolCalls }));
-          res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
+          res.write(formatSSEChunk(completionId, model, { tool_calls: toolCalls }, 'tool_calls'));
         } else {
-          if (!afterContent) {
-            res.write(formatSSEChunk(completionId, model, { content: dsmlBuffer }));
-          }
           res.write(formatSSEChunk(completionId, model, {}, 'stop'));
         }
       } else {
         res.write(formatSSEChunk(completionId, model, {}, 'stop'));
       }
 
-      // ── Optional trailing usage chunk ──────────────────────────────────────
+      // Trailing usage chunk (OpenAI spec: emitted when include_usage: true)
       if (includeUsage) {
-        if (upstreamUsage) {
-          res.write(formatSSEUsageChunk(completionId, model, {
-            promptTokens: upstreamUsage.prompt_tokens ?? promptTokens,
-            completionTokens: upstreamUsage.completion_tokens ?? estimateTokens(' '.repeat(completionChars))
-          }));
-        } else {
-          const completionTokens = estimateTokens(' '.repeat(completionChars));
-          res.write(formatSSEUsageChunk(completionId, model, {
-            promptTokens,
-            completionTokens
-          }));
-        }
+        const completionTokens = upstreamUsage?.completion_tokens ?? estimateTokens(completionChars > 0 ? 'x'.repeat(completionChars) : '');
+        const totalTokens      = upstreamUsage?.total_tokens ?? (promptTokens + completionTokens);
+        res.write(formatSSEUsageChunk(completionId, model, {
+          prompt_tokens:     upstreamUsage?.prompt_tokens ?? promptTokens,
+          completion_tokens: completionTokens,
+          total_tokens:      totalTokens
+        }));
       }
 
       res.write(formatSSEDone());
       res.end();
 
-      logger.success(`Stream completed: ${chunkCount} chunks sent.`);
+      logger.success(
+        `Stream completed (${chunkCount} chunks, ~${completionChars} chars, ` +
+        `prompt ~${promptTokens} tokens). Client disconnected cleanly.`
+      );
 
-    // ── NON-STREAMING RESPONSE ───────────────────────────────────────────────
+    // ── NON-STREAMING RESPONSE ─────────────────────────────────────────────
     } else {
       const { content, reasoning_content, toolCalls, usage } = await executeWithRetry(
         async () => {
@@ -440,14 +412,12 @@ export async function handleChatCompletion(req, res) {
           let finalContent = fullContent;
           let finalToolCalls = nativeToolCalls || [];
 
-          // Only parse Gemini DSML if native tool calls weren't explicitly supplied
           if (!nativeToolCalls) {
             const parsed = parseDSML(fullContent);
             finalContent = parsed.content;
             finalToolCalls = parsed.toolCalls;
 
-            const isGemini = provider.id === 'gemini' || provider.name === 'gemini';
-            if (isGemini && isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
+            if (isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
               logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
               const err = new Error(`Upstream model error: ${parsed.content}`);
               err.status = 502;
@@ -492,7 +462,6 @@ export async function handleChatCompletion(req, res) {
     }
 
   } catch (err) {
-    // Ignore abort errors (expected when client disconnects or request cancelled)
     if (signal.aborted || err.name === 'AbortError') {
       logger.info('[ChatController] Request was aborted cleanly.');
       if (!res.writableEnded) res.end();

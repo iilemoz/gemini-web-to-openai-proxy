@@ -1,12 +1,12 @@
 /**
  * Unified Provider Adapter Contract.
- * Abstract base class for all AI model providers (Gemini, future OpenAI, DeepSeek, Anthropic, etc.).
+ * Abstract base class for Google Gemini Web provider integration.
  *
- * Provides a standardized lifecycle:
+ * Standardized lifecycle:
  * - Identification & metadata
  * - Lifecycle initialization & configuration validation
  * - Model discovery & capability negotiation
- * - Streaming & non-streaming completions
+ * - Streaming & non-streaming text completions
  * - Usage & error normalization
  * - Cancellation & health checks
  */
@@ -67,7 +67,6 @@ export class BaseProvider {
    *     chat?: boolean,
    *     stream?: boolean,
    *     tools?: boolean,
-   *     vision?: boolean,
    *     json?: boolean,
    *     reasoning?: boolean,
    *     responses?: boolean
@@ -103,7 +102,6 @@ export class BaseProvider {
    *   chat: boolean,
    *   stream: boolean,
    *   tools: boolean,
-   *   vision: boolean,
    *   json: boolean,
    *   reasoning: boolean,
    *   responses: boolean
@@ -124,7 +122,6 @@ export class BaseProvider {
       chat: true,
       stream: true,
       tools: true,
-      vision: false,
       json: false,
       reasoning: false,
       responses: true,
