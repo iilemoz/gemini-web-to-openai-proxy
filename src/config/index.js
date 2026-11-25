@@ -9,6 +9,7 @@ export const config = {
   defaultModel: process.env.DEFAULT_MODEL || 'gemini-flash',
   geminiSecure1psid: process.env.GEMINI_SECURE_1PSID || '',
   geminiSecure1psidts: process.env.GEMINI_SECURE_1PSIDTS || '',
+  geminiSecure1psidcc: process.env.GEMINI_SECURE_1PSIDCC || '',
   proxyApiKey: process.env.PROXY_API_KEY || '',
   allowCookiePassthrough: process.env.ALLOW_COOKIE_PASSTHROUGH === 'true',
   rateLimitEnabled: process.env.RATE_LIMIT_ENABLED !== 'false',

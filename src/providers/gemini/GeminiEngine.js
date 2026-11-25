@@ -54,6 +54,9 @@ export class GeminiEngine {
       if (secure1psidts) {
         client.cookies['__Secure-1PSIDTS'] = secure1psidts;
       }
+      if (config.geminiSecure1psidcc) {
+        client.cookies['__Secure-1PSIDCC'] = config.geminiSecure1psidcc;
+      }
 
       this.accountClients.set(secure1psid, client);
       return { client, isTemporary: false };

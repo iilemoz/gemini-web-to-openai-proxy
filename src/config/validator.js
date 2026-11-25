@@ -71,6 +71,29 @@ export function validateStartupConfig(cfg) {
     }
   }
 
+  // Upstream proxy URL validation (if configured)
+  if (cfg.upstreamProxy && typeof cfg.upstreamProxy === 'string' && cfg.upstreamProxy.trim().length > 0) {
+    try {
+      const parsedUrl = new URL(cfg.upstreamProxy);
+      const validProtocols = ['http:', 'https:', 'socks:', 'socks4:', 'socks5:', 'socks5h:'];
+      if (!validProtocols.includes(parsedUrl.protocol)) {
+        errors.push(`Invalid upstream proxy protocol: "${parsedUrl.protocol}". Must be one of: http:, https:, socks5:.`);
+      }
+    } catch {
+      errors.push('Invalid upstream proxy URL configuration. Must be a valid URL (e.g. http://proxy.example.com:8080).');
+    }
+  }
+
+  // Rate limit configuration validation
+  if (cfg.rateLimitEnabled) {
+    if (cfg.rateLimitMax !== undefined && (!Number.isInteger(cfg.rateLimitMax) || cfg.rateLimitMax <= 0)) {
+      errors.push(`Invalid RATE_LIMIT_MAX: "${cfg.rateLimitMax}". Must be a positive integer.`);
+    }
+    if (cfg.rateLimitWindowMs !== undefined && (!Number.isInteger(cfg.rateLimitWindowMs) || cfg.rateLimitWindowMs < 1000)) {
+      errors.push(`Invalid RATE_LIMIT_WINDOW_MS: "${cfg.rateLimitWindowMs}". Must be an integer >= 1000ms.`);
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors

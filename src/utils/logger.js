@@ -31,6 +31,7 @@ const SENSITIVE_PATTERNS = [
   /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi,
   /__Secure-1PSID=[^;\s&"']+/gi,
   /__Secure-1PSIDTS=[^;\s&"']+/gi,
+  /__Secure-1PSIDCC=[^;\s&"']+/gi,
   /\bg\.a\.[A-Za-z0-9._-]{30,}\b/gi,
   /\bsk-[A-Za-z0-9_-]{20,}\b/gi
 ];
@@ -48,7 +49,8 @@ export function redactSensitiveText(str) {
   const secretsToRedact = [
     config?.proxyApiKey,
     config?.geminiSecure1psid,
-    config?.geminiSecure1psidts
+    config?.geminiSecure1psidts,
+    config?.geminiSecure1psidcc
   ].filter(s => typeof s === 'string' && s.length > 4);
 
   for (const secret of secretsToRedact) {
