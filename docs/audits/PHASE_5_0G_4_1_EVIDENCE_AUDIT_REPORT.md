@@ -195,7 +195,7 @@ For developers running interactive desktop IDE sessions, follow these verified s
 | **Branch** | `phase-4-lemo-cli` |
 | **Baseline HEAD Commit** | `1a06337` (`test(phase-5.0g.4): verify live IDE integration and smoke tests`) |
 | **Intermediate Closeout Commit** | `721f21c` (`docs(phase-5.0g.4.1): audit integration evidence and closeout`) |
-| **Final Closeout Commit** | `d4e5f6a` *(recorded upon commit)* |
+| **Final Closeout Commit** | `30f8613` (`docs(phase-5.0g.4.2): finalize evidence audit and git closeout`) |
 | **Source Code Modifications (`src/`)** | None (Zero production changes) |
 | **API Behavior Modifications** | None (Preserved 100%) |
 | **Multimodal / Cursor / Provider Changes** | None (Strictly excluded) |
