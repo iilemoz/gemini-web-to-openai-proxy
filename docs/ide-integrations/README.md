@@ -10,7 +10,6 @@ This directory provides verified setup guides, configuration examples, security 
 
 | Document | Description |
 |---|---|
-| [Cursor Integration Guide](cursor.md) | Step-by-step setup for Cursor IDE (Chat, Composer, and Base URL override). |
 | [Continue Integration Guide](continue.md) | Configuration for Continue.dev in VS Code and JetBrains (`config.yaml` / `config.json`). |
 | [Cline Integration Guide](cline.md) | Autonomous agent setup for Cline (tool calling, multi-turn interactions, and text-only guardrails). |
 | [Roo Code Integration Guide](roo-code.md) | Multi-mode configuration for Roo Code (Architect, Code, and Ask modes). |
@@ -27,8 +26,8 @@ The proxy acts as a high-performance, local HTTP bridge translating OpenAI API s
 ```text
 ┌───────────────────────────────┐
 │  IDEs & Coding Agents         │
-│  (Cursor, Continue, Cline,    │
-│   Roo Code, DeepSeek Harness) │
+│  (Continue, Cline, Roo Code,  │
+│   DeepSeek Harness)           │
 └───────────────┬───────────────┘
                 │ OpenAI HTTP / SSE (JSON)
                 ▼

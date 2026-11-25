@@ -1,6 +1,6 @@
 # Cline (Autonomous Coding Agent) Integration Guide
 
-This guide details configuring **Cline** (formerly Claude Dev) in Visual Studio Code / Cursor to use `gemini-web-to-openai-proxy` as its AI backend.
+This guide details configuring **Cline** (formerly Claude Dev) in Visual Studio Code to use `gemini-web-to-openai-proxy` as its AI backend.
 
 ---
 
@@ -25,7 +25,7 @@ Cline is an autonomous coding agent that executes terminal commands, reads and w
 
 ## 2. Configuration Steps in Cline
 
-1. Open VS Code or Cursor.
+1. Open VS Code.
 2. Click the **Cline robot icon** in the primary Activity Bar (left or right pane).
 3. Click the **Settings (gear icon)** at the top right of the Cline panel.
 4. Configure the following fields:

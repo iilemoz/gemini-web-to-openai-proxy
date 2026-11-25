@@ -85,7 +85,7 @@ If you wish to use **Account Mode** (for higher quotas, model availability, and 
 ## 4. Network Exposure & Localhost Binding
 
 ### Recommended: Localhost Only (`127.0.0.1`)
-When running the proxy for personal IDE use (Cursor, Continue, Cline, Roo Code), keep the proxy bound to loopback:
+When running the proxy for personal IDE use (Continue, Cline, Roo Code), keep the proxy bound to loopback:
 ```env
 HOST=127.0.0.1
 PORT=3000

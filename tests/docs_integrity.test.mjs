@@ -13,7 +13,6 @@ const docsDir = path.resolve(rootDir, 'docs', 'ide-integrations');
 test('Documentation Testing Suite', async (t) => {
   const expectedDocFiles = [
     'README.md',
-    'cursor.md',
     'continue.md',
     'cline.md',
     'roo-code.md',

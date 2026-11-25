@@ -8,11 +8,10 @@ The Universal AI Agent Infrastructure is designed to power major AI coding envir
 
 | Client / Tool | Protocol | Base URL | Model Setting |
 | :--- | :--- | :--- | :--- |
-| **Cursor** | OpenAI Compatible | `http://localhost:3000/v1` | `gemini-flash` or `gemini-pro` |
 | **Continue.dev (VS Code / JetBrains)** | OpenAI Compatible | `http://localhost:3000/v1` | `gemini-flash` |
+| **Cline / Roo Code (VS Code)** | OpenAI Compatible / MCP | `http://localhost:3000/v1` | `gemini-flash` |
 | **Aider** | OpenAI Compatible | `http://localhost:3000/v1` | `gemini-flash` |
 | **DeepSeek Harness** | OpenAI Compatible | `http://localhost:3000/v1` | `gemini-flash` |
-| **Cline / Roo Code** | OpenAI Compatible / MCP | `http://localhost:3000/v1` | `gemini-flash` |
 | **Claude Desktop** | MCP (Model Context Protocol) | `http://localhost:3000/v1/mcp` | N/A (Tool Provider) |
 
 ---

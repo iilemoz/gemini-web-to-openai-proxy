@@ -31,7 +31,7 @@
   - **Guest Mode (Default)**: Fully anonymous, instant out-of-the-box usage with zero API keys or cookies.
   - **Account Mode**: Pass `__Secure-1PSID` / `__Secure-1PSIDTS` via `.env` or client `Authorization: Bearer <cookie>` to access user quotas and advanced capabilities.
 - **🛠️ Dual Tool Execution Modes**:
-  - **Mode A (IDE-Managed Tool Calling)**: Standard OpenAI `tools` definitions parsed and returned via standard `tool_calls` for IDE execution (Cursor, Continue, Cline, DeepSeek Harness).
+  - **Mode A (IDE-Managed Tool Calling)**: Standard OpenAI `tools` definitions parsed and returned via standard `tool_calls` for IDE execution (Continue, Cline, Roo Code, DeepSeek Harness).
   - **Mode B (Agent-Managed Execution)**: Autonomous internal execution through the Universal Tool Dispatcher across local workspace and cloud sandboxes.
 - **🤖 Autonomous Agent Orchestrator**:
   - Full multi-step loop: Inspect -> Plan -> Tool Execution -> Error Detection -> Self-Healing Recovery -> Completion Verification.
@@ -175,7 +175,7 @@ gemini-web-to-openai-proxy/
     ├── CLOUD_RUNTIME.md               # Cloud Docker sandbox & Process isolation
     ├── MCP_INTEGRATION.md             # Model Context Protocol integration guide
     ├── SECURITY.md                    # Security architecture & sandbox policies
-    ├── IDE_COMPATIBILITY.md           # Setup guides for Cursor, Continue, Aider, Cline
+    ├── IDE_COMPATIBILITY.md           # Setup guides for Continue, Cline, Roo Code
     ├── DEPLOYMENT.md                  # Production deployment & Docker recipes
     └── TROUBLESHOOTING.md             # Diagnostics & troubleshooting runbook
 ```
@@ -292,7 +292,6 @@ For complete setup, evaluation examples, and benchmark execution instructions, s
 
 Comprehensive, verified integration guides and configuration profiles are available in [`docs/ide-integrations/`](docs/ide-integrations/README.md):
 
-- 🎯 **[Cursor Integration Guide](docs/ide-integrations/cursor.md)**: Chat, Composer, and base URL override.
 - 🚀 **[Continue.dev Integration Guide](docs/ide-integrations/continue.md)**: Config setup for VS Code/JetBrains (Chat & Inline Edit).
 - 🤖 **[Cline Integration Guide](docs/ide-integrations/cline.md)**: Autonomous agent tool calling and multi-turn workflows.
 - 🦘 **[Roo Code Integration Guide](docs/ide-integrations/roo-code.md)**: Multi-mode setup (Code, Architect, Ask).
@@ -316,7 +315,7 @@ Comprehensive, verified integration guides and configuration profiles are availa
 | [CLOUD_RUNTIME.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/CLOUD_RUNTIME.md) | Docker container management and graceful process isolation fallback |
 | [MCP_INTEGRATION.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/MCP_INTEGRATION.md) | Model Context Protocol server/client guide |
 | [SECURITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/SECURITY.md) | Threat modeling, sandboxing policies, and authentication design |
-| [IDE_COMPATIBILITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IDE_COMPATIBILITY.md) | Client integration guides for Cursor, Continue, Aider, and Cline |
+| [IDE_COMPATIBILITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IDE_COMPATIBILITY.md) | Client integration guides for Continue, Cline, and Roo Code |
 | [DEPLOYMENT.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/DEPLOYMENT.md) | Systemd, PM2, Docker, and reverse proxy deployment guide |
 | [TROUBLESHOOTING.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/TROUBLESHOOTING.md) | Diagnostic workflows, known issues, and recovery procedures |
 

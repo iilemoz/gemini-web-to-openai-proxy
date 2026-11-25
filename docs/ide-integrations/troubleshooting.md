@@ -47,7 +47,7 @@ Before diving into specific error codes, run these verification checks:
 - **Cause:** `PROXY_API_KEY` is configured in your `.env` file, but the IDE is sending a missing or mismatched `Authorization: Bearer <key>` or `x-api-key` header.
 - **Diagnosis:** Inspect `.env` for `PROXY_API_KEY`.
 - **Fix:**
-  - In your IDE (Cursor, Continue, Cline, Roo Code), ensure the API Key field matches the exact value of `PROXY_API_KEY`.
+  - In your IDE (Continue, Cline, Roo Code), ensure the API Key field matches the exact value of `PROXY_API_KEY`.
   - If running in local development mode without security requirements, you can clear `PROXY_API_KEY` in `.env` to allow open access.
 
 ---
@@ -75,7 +75,7 @@ Before diving into specific error codes, run these verification checks:
     - `gemini-pro`
     - `gemini-thinking`
     - `gemini-lite`
-  - In Cursor, uncheck or remove all default `gpt-*` models from the active model list.
+  - Ensure any default non-Gemini models are unselected or removed from your IDE's active model list.
 
 ---
 

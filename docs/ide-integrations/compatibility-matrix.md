@@ -18,7 +18,6 @@ The table below summarizes the compatibility of external IDEs and AI coding agen
 
 | IDE / Extension | Configuration Verified | Protocol Verified | Streaming (SSE) | Tool Calling | Multi-Turn Interaction | Live IDE Status | Known Unsupported Features |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Cursor IDE** | ✅ Yes | ✅ Yes | ✅ Supported | ⚠️ Client-side | ✅ Supported | Verified (Chat & Composer) | Tab Autocomplete (uses Cursor cloud); Image inputs |
 | **Continue.dev** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Chat & Inline Edit) | Tab Autocomplete FIM (relies on missing `/v1/completions`); Image inputs |
 | **Cline** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Protocol Level) | Browser screenshot / visual inspection; Image inputs |
 | **Roo Code** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Protocol Level) | Image/vision analysis; Image inputs |
@@ -27,17 +26,7 @@ The table below summarizes the compatibility of external IDEs and AI coding agen
 
 ## 2. Detailed IDE Capabilities & Constraints
 
-### 2.1 Cursor IDE
-- **Base URL Setting:** `http://localhost:3000/v1` (via OpenAI Base URL Override).
-- **Authentication:** Accepts `PROXY_API_KEY` (or dummy string e.g. `sk-cursor-local` in open dev mode).
-- **Supported Workflows:**
-  - Cursor Chat (`Ctrl + L` / `Cmd + L`): Fully functional with streaming tokens.
-  - Cursor Composer (`Ctrl + I` / `Cmd + I`): Multi-file generation and editing.
-- **Unsupported Workflows:**
-  - Cursor Tab Autocomplete: Does not query custom OpenAI endpoints.
-  - Image / Multimodal Input: Dropping images in Chat fails with HTTP 400 (`image_input_unsupported`).
-
-### 2.2 Continue.dev
+### 2.1 Continue.dev
 - **Configuration Format:** `~/.continue/config.yaml` or `config.json` with `provider: openai`.
 - **Base URL Setting:** `http://localhost:3000/v1`.
 - **Supported Workflows:**
@@ -47,7 +36,7 @@ The table below summarizes the compatibility of external IDEs and AI coding agen
 - **Unsupported Workflows:**
   - `tabAutocompleteModel`: Continue's code completion attempts to call `/v1/completions`. Because this proxy strictly implements `/v1/chat/completions`, autocomplete requests fail with HTTP 404 (`not_found`).
 
-### 2.3 Cline (Autonomous Coding Agent)
+### 2.2 Cline (Autonomous Coding Agent)
 - **Configuration Format:** Extension Settings -> Provider: `OpenAI Compatible`.
 - **Base URL Setting:** `http://localhost:3000/v1`.
 - **Supported Workflows:**
@@ -57,7 +46,7 @@ The table below summarizes the compatibility of external IDEs and AI coding agen
 - **Unsupported Workflows:**
   - Browser screenshots and graphical UI inspections (fails with HTTP 400 `image_input_unsupported`).
 
-### 2.4 Roo Code (Multi-Mode Agent)
+### 2.3 Roo Code (Multi-Mode Agent)
 - **Configuration Format:** Extension Settings -> Provider: `OpenAI Compatible`.
 - **Base URL Setting:** `http://localhost:3000/v1`.
 - **Supported Workflows:**
