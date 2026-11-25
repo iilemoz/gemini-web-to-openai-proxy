@@ -9,7 +9,7 @@ import {
 import { parseDSML } from '../utils/dsmlParser.js';
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
-import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
+import { isUpstreamErrorText, mapUpstreamError } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
 import {
@@ -530,18 +530,13 @@ export async function handleChatCompletion(req, res) {
 
     logger.error('Error handling chat completion:', err);
 
+    const { status, body } = mapUpstreamError(err);
+
     if (!res.headersSent && !hasStartedStreaming) {
-      const status = err.status || 500;
-      res.status(status).json({
-        error: {
-          message: err.message || 'Internal server error while processing completion',
-          type:    err.type || (status === 502 ? 'upstream_error' : (status === 429 ? 'insufficient_quota' : 'api_error')),
-          code:    err.code || 'internal_error'
-        }
-      });
+      res.status(status).json(body);
     } else {
       if (!res.writableEnded) {
-        res.write(`data: ${JSON.stringify({ error: { message: err.message, type: 'upstream_error' } })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: body.error })}\n\n`);
         res.write(formatSSEDone());
         res.end();
       }

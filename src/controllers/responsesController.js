@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { registry, modelRouter } from '../providers/index.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
-import { isUpstreamErrorText } from '../utils/upstreamErrors.js';
+import { isUpstreamErrorText, mapUpstreamError } from '../utils/upstreamErrors.js';
 import { requestTracker } from '../utils/requestTracker.js';
 import { executeWithRetry } from '../utils/retry.js';
 import { validateResponsesInput } from '../utils/textOnlyValidator.js';
@@ -209,14 +209,8 @@ export async function handleResponses(req, res) {
     }
 
     logger.error('[Responses API] Error generating response:', err);
-    const status = err.status || 500;
-    res.status(status).json({
-      error: {
-        message: err.message || 'Error processing response',
-        type:    status === 502 ? 'upstream_error' : 'api_error',
-        code:    err.code || 'internal_error'
-      }
-    });
+    const { status, body } = mapUpstreamError(err);
+    res.status(status).json(body);
   } finally {
     res.removeListener('close', onClientClose);
     if (timeoutTimer) clearTimeout(timeoutTimer);
