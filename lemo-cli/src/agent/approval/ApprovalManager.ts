@@ -7,12 +7,15 @@
 import crypto from 'node:crypto';
 import { canonicalize } from './CanonicalSerializer.js';
 import { SecurityError } from '../../core/errors/index.js';
+import type { DestinationIdentity } from '../tools/Tool.js';
 
 export interface WorkspaceIdentity {
   canonicalPath: string;
   deviceNumber: number;
   inodeNumber: number;
 }
+
+export type { DestinationIdentity };
 
 export interface CanonicalApprovalRecord {
   approvalId: string;
@@ -29,7 +32,9 @@ export interface CanonicalApprovalRecord {
     originalContentHash?: string | undefined;
     proposedContentHash?: string | undefined;
     commandStringHash?: string | undefined;
+    destinationContentHash?: string | undefined;
   };
+  destinationIdentity?: DestinationIdentity | undefined;
   parameters: Record<string, unknown>;
   preview?: string | undefined;
   issuedAt: string;
@@ -45,6 +50,32 @@ export interface ExpectedValidation {
   originalContentHash?: string | undefined;
   proposedContentHash?: string | undefined;
   commandStringHash?: string | undefined;
+  destinationContentHash?: string | undefined;
+  destinationIdentity?: DestinationIdentity | undefined;
+}
+
+/**
+ * Recursively freezes an object and all nested properties.
+ */
+export function deepFreeze<T>(obj: T): Readonly<T> {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  Object.freeze(obj);
+  for (const key of Object.getOwnPropertyNames(obj)) {
+    const val = (obj as Record<string, unknown>)[key];
+    if (val !== null && typeof val === 'object' && !Object.isFrozen(val)) {
+      deepFreeze(val);
+    }
+  }
+  return obj as Readonly<T>;
+}
+
+/**
+ * Deep clones a JSON-serializable object.
+ */
+function deepClone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj)) as T;
 }
 
 interface StoredApproval {
@@ -78,7 +109,9 @@ export class ApprovalManager {
       originalContentHash?: string | undefined;
       proposedContentHash?: string | undefined;
       commandStringHash?: string | undefined;
+      destinationContentHash?: string | undefined;
     };
+    destinationIdentity?: DestinationIdentity | undefined;
     parameters: Record<string, unknown>;
     preview?: string | undefined;
   }): { record: CanonicalApprovalRecord; token: string } {
@@ -114,8 +147,28 @@ export class ApprovalManager {
           : {}),
         ...(params.payloadDigest.commandStringHash
           ? { commandStringHash: params.payloadDigest.commandStringHash }
+          : {}),
+        ...(params.payloadDigest.destinationContentHash
+          ? { destinationContentHash: params.payloadDigest.destinationContentHash }
           : {})
       },
+      ...(params.destinationIdentity
+        ? {
+            destinationIdentity: {
+              canonicalPath: params.destinationIdentity.canonicalPath,
+              exists: params.destinationIdentity.exists,
+              ...(params.destinationIdentity.deviceNumber !== undefined
+                ? { deviceNumber: params.destinationIdentity.deviceNumber }
+                : {}),
+              ...(params.destinationIdentity.inodeNumber !== undefined
+                ? { inodeNumber: params.destinationIdentity.inodeNumber }
+                : {}),
+              ...(params.destinationIdentity.type !== undefined
+                ? { type: params.destinationIdentity.type }
+                : {})
+            }
+          }
+        : {}),
       parameters: params.parameters,
       preview: params.preview,
       issuedAt,
@@ -126,7 +179,7 @@ export class ApprovalManager {
     const token = crypto.createHmac('sha256', this.secretKey).update(canonicalJson).digest('hex');
 
     const stored: StoredApproval = {
-      record,
+      record: deepFreeze(deepClone(record)) as CanonicalApprovalRecord,
       token,
       canonicalJson,
       consumed: false
@@ -135,7 +188,7 @@ export class ApprovalManager {
     this.records.set(approvalId, stored);
     this.tokenToId.set(token, approvalId);
 
-    return { record, token };
+    return { record: deepFreeze(deepClone(record)) as CanonicalApprovalRecord, token };
   }
 
   /**
@@ -291,7 +344,57 @@ export class ApprovalManager {
       );
     }
 
-    return stored.record;
+    // 12. Destination identity validation
+    if (stored.record.destinationIdentity) {
+      if (!expected.destinationIdentity) {
+        throw new SecurityError(
+          'Execution denied: missing required destinationIdentity in validation request'
+        );
+      }
+      const approvedDest = stored.record.destinationIdentity;
+      const currentDest = expected.destinationIdentity;
+      if (approvedDest.canonicalPath !== currentDest.canonicalPath) {
+        throw new SecurityError(
+          `Execution denied: approval destination path '${approvedDest.canonicalPath}' does not match current '${currentDest.canonicalPath}'`
+        );
+      }
+      if (approvedDest.exists !== currentDest.exists) {
+        throw new SecurityError(
+          `Execution denied: destination existence changed from ${approvedDest.exists} to ${currentDest.exists}`
+        );
+      }
+      if (approvedDest.exists) {
+        if (approvedDest.type && currentDest.type && approvedDest.type !== currentDest.type) {
+          throw new SecurityError(
+            `Execution denied: destination type changed from '${approvedDest.type}' to '${currentDest.type}'`
+          );
+        }
+        if (
+          (approvedDest.deviceNumber !== undefined && approvedDest.deviceNumber !== currentDest.deviceNumber) ||
+          (approvedDest.inodeNumber !== undefined && approvedDest.inodeNumber !== currentDest.inodeNumber)
+        ) {
+          throw new SecurityError(
+            'Execution denied: destination filesystem device or inode identity changed'
+          );
+        }
+      }
+    }
+
+    // 13. Destination content fingerprint validation
+    if (stored.record.payloadDigest.destinationContentHash) {
+      if (!expected.destinationContentHash || typeof expected.destinationContentHash !== 'string') {
+        throw new SecurityError(
+          'Execution denied: missing required destinationContentHash fingerprint in validation request'
+        );
+      }
+      if (stored.record.payloadDigest.destinationContentHash !== expected.destinationContentHash) {
+        throw new SecurityError(
+          'Execution denied: approved destination content digest does not match current destination file fingerprint'
+        );
+      }
+    }
+
+    return deepFreeze(deepClone(stored.record)) as CanonicalApprovalRecord;
   }
 
   /**

@@ -8,7 +8,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { Tool, type ToolSchema, type ApprovalPreparation } from '../Tool.js';
+import { Tool, type ToolSchema, type ApprovalPreparation, type DestinationIdentity } from '../Tool.js';
 import type { WorkspaceManager } from '../../workspace/WorkspaceManager.js';
 import type { ApprovalManager } from '../../approval/ApprovalManager.js';
 import type { ToolPermission, ToolResult, ToolExecutionContext } from '../../types/index.js';
@@ -114,7 +114,9 @@ export class MoveFileTool extends Tool {
       throw new SecurityError(`Unsupported file type: '${relSource}'`);
     }
 
-    // Check destination existence for non-overwrite
+    // Check destination existence and capture fingerprint / identity
+    let destinationContentHash: string | undefined;
+    let destinationIdentity: DestinationIdentity | undefined;
     try {
       const destStat = await fs.promises.lstat(canonicalDest);
       if (!overwrite) {
@@ -126,9 +128,31 @@ export class MoveFileTool extends Tool {
       if (destStat.isDirectory()) {
         throw new SecurityError(`Cannot overwrite directory with file: '${relDest}'`);
       }
+      if (destStat.isSymbolicLink()) {
+        throw new SecurityError(`Refusing to overwrite symlink destination: '${relDest}'`);
+      }
+      if (destStat.isFile()) {
+        const destBuf = await fs.promises.readFile(canonicalDest);
+        destinationContentHash = crypto.createHash('sha256').update(destBuf).digest('hex');
+        destinationIdentity = {
+          canonicalPath: canonicalDest,
+          deviceNumber: Number(destStat.dev),
+          inodeNumber: Number(destStat.ino),
+          type: 'file',
+          exists: true
+        };
+      } else {
+        throw new SecurityError(`Unsupported destination file type: '${relDest}'`);
+      }
     } catch (err: unknown) {
       const code = (err as { code?: string })?.code;
-      if (code !== 'ENOENT') {
+      if (code === 'ENOENT') {
+        destinationIdentity = {
+          canonicalPath: canonicalDest,
+          type: 'none',
+          exists: false
+        };
+      } else {
         throw err;
       }
     }
@@ -141,8 +165,10 @@ export class MoveFileTool extends Tool {
       ],
       payloadDigest: {
         algorithm: 'sha256',
-        ...(originalContentHash ? { originalContentHash } : {})
+        ...(originalContentHash ? { originalContentHash } : {}),
+        ...(destinationContentHash ? { destinationContentHash } : {})
       },
+      destinationIdentity,
       preview
     };
   }
@@ -194,6 +220,51 @@ export class MoveFileTool extends Tool {
         originalContentHash = crypto.createHash('sha256').update(buf).digest('hex');
       }
 
+      // Revalidate destination identity and content hash immediately before approval validation
+      let destinationContentHash: string | undefined;
+      let destinationIdentity: DestinationIdentity | undefined;
+      try {
+        const destStat = await fs.promises.lstat(canonicalDest);
+        if (destStat.isFile()) {
+          const destBuf = await fs.promises.readFile(canonicalDest);
+          destinationContentHash = crypto.createHash('sha256').update(destBuf).digest('hex');
+          destinationIdentity = {
+            canonicalPath: canonicalDest,
+            deviceNumber: Number(destStat.dev),
+            inodeNumber: Number(destStat.ino),
+            type: 'file',
+            exists: true
+          };
+        } else if (destStat.isDirectory()) {
+          destinationIdentity = {
+            canonicalPath: canonicalDest,
+            deviceNumber: Number(destStat.dev),
+            inodeNumber: Number(destStat.ino),
+            type: 'directory',
+            exists: true
+          };
+        } else if (destStat.isSymbolicLink()) {
+          destinationIdentity = {
+            canonicalPath: canonicalDest,
+            deviceNumber: Number(destStat.dev),
+            inodeNumber: Number(destStat.ino),
+            type: 'symlink',
+            exists: true
+          };
+        }
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code === 'ENOENT') {
+          destinationIdentity = {
+            canonicalPath: canonicalDest,
+            type: 'none',
+            exists: false
+          };
+        } else {
+          throw err;
+        }
+      }
+
       // Cryptographic approval validation
       if (this.approvalManager) {
         this.approvalManager.validateAndConsume(context?.approvalToken, {
@@ -202,11 +273,16 @@ export class MoveFileTool extends Tool {
           workspaceIdentity: this.workspaceManager.getIdentity(),
           canonicalPath: canonicalSource,
           destinationCanonicalPath: canonicalDest,
-          ...(originalContentHash ? { originalContentHash } : {})
+          ...(originalContentHash ? { originalContentHash } : {}),
+          ...(destinationContentHash ? { destinationContentHash } : {}),
+          ...(destinationIdentity ? { destinationIdentity } : {})
         });
       }
 
-      const result = await this.workspaceManager.moveEntry(canonicalSource, canonicalDest, { overwrite });
+      const result = await this.workspaceManager.moveEntry(canonicalSource, canonicalDest, {
+        overwrite,
+        expectedDestIdentity: destinationIdentity
+      });
 
       return {
         success: true,

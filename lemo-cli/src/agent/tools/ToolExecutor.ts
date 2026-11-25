@@ -102,6 +102,7 @@ export class ToolExecutor {
               workspaceIdentity: this.workspaceManager.getIdentity(),
               targetPaths: prep.targetPaths,
               payloadDigest: prep.payloadDigest,
+              destinationIdentity: prep.destinationIdentity,
               parameters: parsedArgs,
               preview: prep.preview
             });

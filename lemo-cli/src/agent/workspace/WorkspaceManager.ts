@@ -8,6 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { SecurityError, WorkspaceError, ToolError } from '../../core/errors/index.js';
+import type { DestinationIdentity } from '../tools/Tool.js';
 
 export interface WorkspaceIdentity {
   canonicalPath: string;
@@ -232,12 +233,22 @@ export class WorkspaceManager {
   /**
    * Checks whether a file path points to a sensitive environment or secret file.
    * Performs case-insensitive matching across basename and normalized relative path.
+   * Strips Windows Alternate Data Stream (ADS) specifications while preserving drive letters.
    */
   public isSensitive(filePath: string): boolean {
     const normalized = path.normalize(filePath).replace(/\\/g, '/').toLowerCase();
-    const base = path.basename(normalized);
+    const rawBase = path.basename(normalized);
     const segments = normalized.split('/').filter(Boolean);
-    const cleanSegments = segments.map((s) => s.replace(/[. ]+$/g, ''));
+
+    const stripAdsAndTrailing = (name: string): string => {
+      if (/^[a-z]:$/i.test(name)) return name; // Preserve Windows drive letter
+      const withoutStream = name.includes(':') ? name.split(':')[0]! : name;
+      return withoutStream.replace(/[. ]+$/g, '');
+    };
+
+    const cleanBase = stripAdsAndTrailing(rawBase);
+    const cleanSegments = segments.map(stripAdsAndTrailing);
+    const cleanNormalized = cleanSegments.join('/');
 
     // 0. Git metadata directory roots, submodule configurations, and nested paths
     // Protects .git directory roots, .gitmodules, .git-credentials, .gitconfig, and all files inside any .git directory
@@ -246,57 +257,61 @@ export class WorkspaceManager {
       cleanSegments.includes('.gitmodules') ||
       cleanSegments.includes('.git-credentials') ||
       cleanSegments.includes('.gitconfig') ||
-      base === '.git' ||
-      base === '.gitmodules' ||
-      base === '.git-credentials' ||
-      base === '.gitconfig'
+      cleanBase === '.git' ||
+      cleanBase === '.gitmodules' ||
+      cleanBase === '.git-credentials' ||
+      cleanBase === '.gitconfig'
     ) {
       return true;
     }
 
     // 1. Environment files (.env, .env.local, .env.production, etc.)
-    if (base === '.env' || base.startsWith('.env.')) {
+    if (cleanBase === '.env' || cleanBase.startsWith('.env.')) {
       return true;
     }
 
     // 2. Private SSH keys (id_rsa, id_ed25519, id_ecdsa, id_ecdsa_sk, id_ed25519_sk, id_dsa, etc.)
     // Explicitly allow public keys (*.pub)
-    if (/^id_[a-z0-9_-]+$/i.test(base)) {
+    if (/^id_[a-z0-9_-]+$/i.test(cleanBase)) {
       return true;
     }
 
     // 3. Certificates, private keys & password databases (.pem, .key, .pkcs12, .pfx, .p12, .kdbx, .keystore, .jks)
-    if (/\.(pem|key|pkcs12|pfx|p12|kdbx|keystore|jks)$/i.test(base)) {
+    if (/\.(pem|key|pkcs12|pfx|p12|kdbx|keystore|jks)$/i.test(cleanBase)) {
       return true;
     }
 
     // 4. Secret / credential configuration files
-    if (/^(credentials|client_secret.*|token|secrets?|passwords?)\.(json|ya?ml|ini)$/i.test(base)) {
+    if (/^(credentials|client_secret.*|token|secrets?|passwords?)\.(json|ya?ml|ini)$/i.test(cleanBase)) {
       return true;
     }
 
     // 5. Package manager, tool, and shell secret files
     if (
-      base === '.npmrc' ||
-      base === '.netrc' ||
-      base === '.pypirc' ||
-      base === '.htpasswd' ||
-      base === '.pgpass' ||
-      base === 'master.key' ||
-      base === '.bash_history' ||
-      base === '.zsh_history'
+      cleanBase === '.npmrc' ||
+      cleanBase === '.netrc' ||
+      cleanBase === '.pypirc' ||
+      cleanBase === '.htpasswd' ||
+      cleanBase === '.pgpass' ||
+      cleanBase === 'master.key' ||
+      cleanBase === '.bash_history' ||
+      cleanBase === '.zsh_history'
     ) {
       return true;
     }
 
     // 6. Docker Compose secret overrides (e.g. docker-compose.override.yml, compose.override.yaml)
     // Note: Standard docker-compose.yml / compose.yaml are NOT blocked
-    if (/^(docker-compose|compose)\.override\.(ya?ml)$/i.test(base)) {
+    if (/^(docker-compose|compose)\.override\.(ya?ml)$/i.test(cleanBase)) {
       return true;
     }
 
     // 7. Cloud, VCS, and system credential stores
     if (
+      cleanNormalized.includes('/.aws/credentials') ||
+      cleanNormalized.includes('/.aws/config') ||
+      cleanNormalized.endsWith('.aws/credentials') ||
+      cleanNormalized.endsWith('.aws/config') ||
       normalized.includes('/.aws/credentials') ||
       normalized.includes('/.aws/config') ||
       normalized.endsWith('.aws/credentials') ||
@@ -650,7 +665,11 @@ export class WorkspaceManager {
   public async moveEntry(
     sourcePath: string,
     destinationPath: string,
-    options?: { overwrite?: boolean }
+    options?: {
+      overwrite?: boolean | undefined;
+      expectedDestIdentity?: DestinationIdentity | undefined;
+      directoryMovePolicy?: 'strict' | 'standard' | undefined;
+    }
   ): Promise<{ type: 'file' | 'directory' | 'symlink'; bytesMoved?: number }> {
     const canonicalSource = this.resolvePathNoFollow(sourcePath);
     if (canonicalSource === this.root) {
@@ -732,7 +751,26 @@ export class WorkspaceManager {
         throw new SecurityError('Source directory identity changed prior to rename');
       }
 
-      await fs.promises.rename(canonicalSource, canonicalDest);
+      try {
+        await fs.promises.rename(canonicalSource, canonicalDest);
+      } catch (renameErr: unknown) {
+        const code = (renameErr as { code?: string })?.code;
+        if (code === 'EEXIST' || code === 'ENOTEMPTY' || code === 'EPERM') {
+          throw new ToolError(`Destination already exists: '${this.toRelative(canonicalDest)}'. Cannot overwrite with directory.`);
+        }
+        throw renameErr;
+      }
+
+      // Post-move validation: verify destination directory identity matches original source directory identity
+      const postDestStat = await fs.promises.lstat(canonicalDest);
+      if (
+        !postDestStat.isDirectory() ||
+        Number(postDestStat.ino) !== Number(sourceStat.ino) ||
+        Number(postDestStat.dev) !== Number(sourceStat.dev)
+      ) {
+        throw new SecurityError('Post-move destination identity mismatch for directory');
+      }
+
       return { type: 'directory' };
     }
 
@@ -748,6 +786,19 @@ export class WorkspaceManager {
         if (destStat?.isSymbolicLink()) {
           throw new SecurityError(`Refusing to overwrite symlink destination: '${this.toRelative(canonicalDest)}'`);
         }
+
+        // Revalidate destination identity immediately before atomic overwrite rename
+        const preRenameDestStat = await fs.promises.lstat(canonicalDest);
+        if (
+          !preRenameDestStat.isFile() ||
+          (options?.expectedDestIdentity?.inodeNumber !== undefined &&
+            Number(preRenameDestStat.ino) !== options.expectedDestIdentity.inodeNumber) ||
+          (options?.expectedDestIdentity?.deviceNumber !== undefined &&
+            Number(preRenameDestStat.dev) !== options.expectedDestIdentity.deviceNumber)
+        ) {
+          throw new SecurityError('Destination file identity changed prior to overwrite rename');
+        }
+
         // Revalidate source identity before atomic overwrite rename
         const currentSourceStat = await fs.promises.lstat(canonicalSource);
         if (
@@ -762,6 +813,10 @@ export class WorkspaceManager {
         return { type: 'file', bytesMoved: sourceStat.size };
       } else {
         // Destination does not exist.
+        if (options?.expectedDestIdentity?.exists === true) {
+          throw new SecurityError('Expected destination file disappeared prior to move');
+        }
+
         // For non-overwrite, guarantee race safety via atomic hard link where supported
         if (options?.overwrite !== true) {
           try {
@@ -785,11 +840,21 @@ export class WorkspaceManager {
             if (code === 'EXDEV') {
               throw new SecurityError('Cross-device file move not permitted');
             }
-            // If hardlinks not supported on filesystem (e.g. FAT), fallback to rename
-            await fs.promises.rename(canonicalSource, canonicalDest);
-            return { type: 'file', bytesMoved: sourceStat.size };
+            if (code === 'ENOSYS' || code === 'ENOTSUP' || code === 'EPERM') {
+              throw new SecurityError(`Filesystem does not support atomic link-based non-overwrite relocation (${code})`);
+            }
+            throw linkErr;
           }
         } else {
+          // Overwrite mode requested, but destination did not exist
+          const currentSourceStat = await fs.promises.lstat(canonicalSource);
+          if (
+            !currentSourceStat.isFile() ||
+            Number(currentSourceStat.ino) !== Number(sourceStat.ino) ||
+            Number(currentSourceStat.dev) !== Number(sourceStat.dev)
+          ) {
+            throw new SecurityError('Source file identity changed prior to move rename');
+          }
           await fs.promises.rename(canonicalSource, canonicalDest);
           return { type: 'file', bytesMoved: sourceStat.size };
         }

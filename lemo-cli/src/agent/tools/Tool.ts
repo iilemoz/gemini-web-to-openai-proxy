@@ -18,6 +18,14 @@ export interface ToolSchema {
   [key: string]: unknown;
 }
 
+export interface DestinationIdentity {
+  canonicalPath: string;
+  deviceNumber?: number | undefined;
+  inodeNumber?: number | undefined;
+  type?: 'file' | 'directory' | 'symlink' | 'none' | undefined;
+  exists: boolean;
+}
+
 export interface ApprovalPreparation {
   operationType: 'create' | 'modify' | 'delete' | 'move' | 'execute';
   targetPaths: { canonicalPath: string; workspaceRelative: string }[];
@@ -26,7 +34,9 @@ export interface ApprovalPreparation {
     originalContentHash?: string | undefined;
     proposedContentHash?: string | undefined;
     commandStringHash?: string | undefined;
+    destinationContentHash?: string | undefined;
   };
+  destinationIdentity?: DestinationIdentity | undefined;
   preview?: string | undefined;
   metadata?: Record<string, unknown> | undefined;
 }
