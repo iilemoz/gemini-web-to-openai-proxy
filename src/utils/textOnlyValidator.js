@@ -6,11 +6,15 @@
  */
 
 const BASE64_IMAGE_DATA_URI_REGEX = /data:image\/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=]+/i;
-const MARKDOWN_IMAGE_REGEX = /!\[.*?\]\(\s*(?:https?:\/\/[^\s)"]+|data:image\/[^\s)"]+)(?:\s+["'][^"']*["'])?\s*\)/i;
+// Raw standalone markdown image tag serving as an image attachment (no surrounding conversational/code text)
+const STANDALONE_MARKDOWN_IMAGE_REGEX = /^\s*!\[.*?\]\(\s*(?:https?:\/\/[^\s)"]+|[^\s)"]+\.(?:png|jpe?g|gif|webp|bmp|svg|tiff|ico|avif))(?:\s+["'][^"']*["'])?\s*\)\s*$/i;
 
 /**
  * Checks if a string or object represents an image payload.
- * Does NOT reject legitimate text merely mentioning http(s) URLs with image extensions.
+ * Distinguishes between actual image payloads (Base64 data URIs, structured image objects,
+ * or raw standalone markdown image tags without explanatory text) and ordinary text
+ * discussing or illustrating Markdown syntax (e.g. "Explain this syntax: ![alt](url)",
+ * code blocks, inline quotes, and questions like "Why does ![logo](logo.png) not render?").
  *
  * @param {*} value
  * @returns {boolean}
@@ -19,14 +23,15 @@ export function isImagePayload(value) {
   if (!value) return false;
 
   if (typeof value === 'string') {
-    // 1. Standalone or embedded base64 image data URI
+    // 1. Standalone or embedded base64 image data URI (always rejected as an image payload)
     if (BASE64_IMAGE_DATA_URI_REGEX.test(value)) {
       return true;
     }
-    // 2. Explicit markdown image syntax: ![alt](url)
-    if (MARKDOWN_IMAGE_REGEX.test(value)) {
+    // 2. Standalone raw markdown image tag acting as an image attachment (no explanatory words, code fences, or quotes)
+    if (STANDALONE_MARKDOWN_IMAGE_REGEX.test(value)) {
       return true;
     }
+    // Legitimate text discussing markdown syntax, questions, or code blocks are accepted
     return false;
   }
 

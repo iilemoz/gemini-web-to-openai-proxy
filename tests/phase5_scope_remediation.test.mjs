@@ -141,14 +141,14 @@ test('FINDING 50F1-01 & 50F1-02: Rejects base64 data URI in /v1/chat/completions
   assert.equal(data.error.code, 'image_input_unsupported');
 });
 
-test('FINDING 50F1-01 & 50F1-02: Rejects markdown image syntax in /v1/chat/completions', async () => {
+test('FINDING 50F1-01 & 50F1-02: Rejects standalone markdown image syntax in /v1/chat/completions', async () => {
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'gemini-flash',
       messages: [
-        { role: 'user', content: 'Here is the diagram: ![diagram](https://example.com/arch.png)' }
+        { role: 'user', content: '![diagram](https://example.com/arch.png)' }
       ]
     })
   });
@@ -194,13 +194,13 @@ test('FINDING 50F1-01 & 50F1-02: Rejects base64 and markdown images in /v1/respo
   const data1 = await res1.json();
   assert.equal(data1.error.code, 'image_input_unsupported');
 
-  // 2. Markdown image
+  // 2. Markdown image (standalone)
   const res2 = await fetch(`${baseUrl}/v1/responses`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'gemini-flash',
-      input: 'Check this: ![alt](https://example.com/photo.jpg)'
+      input: '![alt](https://example.com/photo.jpg)'
     })
   });
   assert.equal(res2.status, 400);
@@ -367,16 +367,190 @@ test('FINDING 50F1-05: /v1/models exposes only canonical genuine models without 
   }
 });
 
-test('FINDING 50F1-05: Backward compatibility resolution for aliases remains functional', () => {
-  const resFlash = modelRouter.resolve('gemini-2.5-flash');
-  assert.equal(resFlash.model.id, 'gemini-flash');
-  assert.equal(resFlash.model.upstreamModelId, 'gemini-3-flash');
+test('FINDING 50F1-05: Misleading 2.5 aliases are removed and fail closed with 404 model_not_found', () => {
+  // Verifies that unverified legacy aliases are not resolved and fail closed with 404 model_not_found
+  assert.throws(
+    () => modelRouter.resolve('gemini-2.5-flash'),
+    (err) => err.status === 404 && err.code === 'model_not_found'
+  );
+  assert.throws(
+    () => modelRouter.resolve('gemini-2.5-pro'),
+    (err) => err.status === 404 && err.code === 'model_not_found'
+  );
+  assert.throws(
+    () => modelRouter.resolve('gemini-2.5-thinking'),
+    (err) => err.status === 404 && err.code === 'model_not_found'
+  );
+});
 
-  const resPro = modelRouter.resolve('gemini-2.5-pro');
-  assert.equal(resPro.model.id, 'gemini-pro');
-  assert.equal(resPro.model.upstreamModelId, 'gemini-3-pro');
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Markdown Text Acceptance vs Rejection Matrix (PHASE 5.0F.2.1)
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const resThinking = modelRouter.resolve('gemini-2.5-thinking');
-  assert.equal(resThinking.model.id, 'gemini-thinking');
-  assert.equal(resThinking.model.upstreamModelId, 'gemini-3-thinking');
+test('PHASE 5.0F.2.1: Markdown image syntax in text is accepted while raw payloads are rejected', () => {
+  // Required acceptance cases: ordinary text discussing or illustrating syntax
+  const acceptedCases = [
+    'Explain this Markdown image syntax: ![alt](https://example.com/image.png)',
+    'Why does ![logo](logo.png) not render?',
+    '```markdown\n![alt](https://example.com/image.png)\n```',
+    'Text explaining how Markdown image embedding works: use ![alt](url) format.',
+    '`![alt](https://example.com/image.png)`',
+    '"![alt](https://example.com/image.png)"',
+    'Here is an example in docs: ![photo](https://example.com/photo.jpg)'
+  ];
+
+  for (const text of acceptedCases) {
+    assert.equal(isImagePayload(text), false, `Should NOT treat as image payload: ${text}`);
+    assert.equal(validateMessageContent(text), null, `validateMessageContent should pass: ${text}`);
+    assert.equal(validateResponsesInput(text), null, `validateResponsesInput should pass: ${text}`);
+  }
+
+  // Required rejection cases: raw standalone attachment tags, base64 payloads, and structured objects
+  const rejectedCases = [
+    '![alt](https://example.com/image.png)',
+    '![logo](logo.png)',
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+    'Explain this: ![alt](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==)',
+    { type: 'image_url', image_url: { url: 'https://example.com/photo.png' } },
+    { type: 'image', image: 'https://example.com/photo.png' }
+  ];
+
+  for (const payload of rejectedCases) {
+    assert.equal(isImagePayload(payload), true, `Should treat as image payload: ${JSON.stringify(payload)}`);
+  }
+});
+
+test('PHASE 5.0F.2.1: /v1/chat/completions & /v1/responses accept markdown discussion text', async () => {
+  // 1. /v1/chat/completions accepts markdown discussion
+  const chatRes = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        { role: 'user', content: 'Explain this Markdown image syntax: ![alt](https://example.com/image.png)' }
+      ]
+    })
+  });
+  if (chatRes.status === 400) {
+    const data = await chatRes.json();
+    assert.notEqual(data.error?.code, 'image_input_unsupported');
+  }
+
+  // 2. /v1/responses accepts markdown discussion
+  const respRes = await fetch(`${baseUrl}/v1/responses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      input: 'Why does ![logo](logo.png) not render?'
+    })
+  });
+  if (respRes.status === 400) {
+    const data = await respRes.json();
+    assert.notEqual(data.error?.code, 'image_input_unsupported');
+  }
+
+  // 3. /v1/chat/completions rejects standalone markdown image attachment
+  const rejectRes = await fetch(`${baseUrl}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gemini-flash',
+      messages: [
+        { role: 'user', content: '![alt](https://example.com/image.png)' }
+      ]
+    })
+  });
+  assert.equal(rejectRes.status, 400);
+  const rejectData = await rejectRes.json();
+  assert.equal(rejectData.error.code, 'image_input_unsupported');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Guest Mode Fallback SDK Invocation Arguments Verification (PHASE 5.0F.2.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('PHASE 5.0F.2.1: Guest Mode fallback invokes SDK with exact Model.BASIC_FLASH constant and fails closed for Pro/Thinking', async () => {
+  const engine = new GeminiEngine();
+
+  let capturedChatOpts = null;
+  const mockGuestClient = {
+    newChat: (opts) => {
+      capturedChatOpts = opts;
+      return {
+        generateContentStream: async function* () {
+          yield { candidates: [{ index: 0, text_delta: 'Guest Flash response' }] };
+        }
+      };
+    },
+    close: async () => {}
+  };
+
+  engine.createGuestClient = () => mockGuestClient;
+
+  // 1. Account Mode Flash quota limit -> Exact-model fallback to Guest Mode using Model.BASIC_FLASH
+  const flashLimitError = new Error('Usage limit exceeded for your account plan');
+  flashLimitError.name = 'UsageLimitExceeded';
+
+  const flashGenerator = engine.executeWithFallback({
+    resolvedModel: Model.BASIC_FLASH,
+    isGuest: false,
+    generateOpts: { prompt: 'Test Flash prompt' },
+    signal: null,
+    err: flashLimitError
+  });
+
+  const flashChunks = [];
+  for await (const chunk of flashGenerator) {
+    flashChunks.push(chunk);
+  }
+
+  assert.ok(capturedChatOpts, 'Guest client newChat should have been called');
+  assert.equal(capturedChatOpts.model, Model.BASIC_FLASH, 'Must pass exact Model.BASIC_FLASH to SDK');
+  assert.equal(capturedChatOpts.model.model_name, 'gemini-3-flash');
+  assert.equal(flashChunks[0].text, 'Guest Flash response');
+
+  // Reset spy
+  capturedChatOpts = null;
+
+  // 2. Account Mode Pro quota limit -> MUST FAIL CLOSED, newChat must NOT be called
+  let proCaught = null;
+  try {
+    const proGenerator = engine.executeWithFallback({
+      resolvedModel: Model.BASIC_PRO,
+      isGuest: false,
+      generateOpts: { prompt: 'Test Pro prompt' },
+      signal: null,
+      err: flashLimitError
+    });
+    for await (const _ of proGenerator) {}
+  } catch (err) {
+    proCaught = err;
+  }
+
+  assert.ok(proCaught, 'Pro quota limit must throw error');
+  assert.equal(proCaught.status, 429);
+  assert.equal(proCaught.code, 'insufficient_quota');
+  assert.equal(capturedChatOpts, null, 'Guest client newChat must NOT be called for Pro model');
+
+  // 3. Account Mode Thinking quota limit -> MUST FAIL CLOSED, newChat must NOT be called
+  let thinkingCaught = null;
+  try {
+    const thinkingGenerator = engine.executeWithFallback({
+      resolvedModel: Model.BASIC_THINKING,
+      isGuest: false,
+      generateOpts: { prompt: 'Test Thinking prompt' },
+      signal: null,
+      err: flashLimitError
+    });
+    for await (const _ of thinkingGenerator) {}
+  } catch (err) {
+    thinkingCaught = err;
+  }
+
+  assert.ok(thinkingCaught, 'Thinking quota limit must throw error');
+  assert.equal(thinkingCaught.status, 429);
+  assert.equal(thinkingCaught.code, 'insufficient_quota');
+  assert.equal(capturedChatOpts, null, 'Guest client newChat must NOT be called for Thinking model');
 });

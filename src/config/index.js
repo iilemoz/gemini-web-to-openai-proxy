@@ -27,7 +27,7 @@ export const config = {
   retryMaxDelayMs: parseInt(process.env.RETRY_MAX_DELAY_MS || '8000', 10),
   retryJitter: process.env.RETRY_JITTER !== 'false',
 
-  // Genuine Google Gemini model definitions
+  // Genuine Google Gemini canonical model definitions
   models: [
     {
       id: 'gemini-flash',
@@ -40,16 +40,6 @@ export const config = {
       description: 'Google Gemini Flash (Web)'
     },
     {
-      id: 'gemini-2.5-flash',
-      object: 'model',
-      created: 1715500000,
-      owned_by: 'google',
-      permission: [],
-      root: 'gemini-flash',
-      parent: 'gemini-flash',
-      description: 'Google Gemini Flash Compatibility Alias'
-    },
-    {
       id: 'gemini-pro',
       object: 'model',
       created: 1715500000,
@@ -60,16 +50,6 @@ export const config = {
       description: 'Google Gemini Pro (Web)'
     },
     {
-      id: 'gemini-2.5-pro',
-      object: 'model',
-      created: 1715500000,
-      owned_by: 'google',
-      permission: [],
-      root: 'gemini-pro',
-      parent: 'gemini-pro',
-      description: 'Google Gemini Pro Compatibility Alias'
-    },
-    {
       id: 'gemini-thinking',
       object: 'model',
       created: 1715500000,
@@ -78,16 +58,6 @@ export const config = {
       root: 'gemini-thinking',
       parent: null,
       description: 'Google Gemini Thinking (Web)'
-    },
-    {
-      id: 'gemini-2.5-thinking',
-      object: 'model',
-      created: 1715500000,
-      owned_by: 'google',
-      permission: [],
-      root: 'gemini-thinking',
-      parent: 'gemini-thinking',
-      description: 'Google Gemini Thinking Compatibility Alias'
     },
     {
       id: 'gemini-lite',

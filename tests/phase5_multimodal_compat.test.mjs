@@ -85,7 +85,7 @@ test('Multimodal Rejection: Chat completions rejects HTTP/HTTPS image URLs with 
       messages: [
         {
           role: 'user',
-          content: 'Here is an image: ![diagram](https://example.com/chart.jpg)'
+          content: '![diagram](https://example.com/chart.jpg)'
         }
       ]
     }

@@ -6,7 +6,7 @@
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-412991?logo=openai)](https://platform.openai.com/docs/api-reference)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024--11--05-blueviolet)](https://modelcontextprotocol.io/)
 [![DeepSeek Harness](https://img.shields.io/badge/DeepSeek--Harness-Compatible-success)](https://github.com/DeepSeek-ai/deepseek-harness)
-[![Tests Passing](https://img.shields.io/badge/Tests-147%2F147%20Passing-brightgreen.svg)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-150%2F150%20Passing-brightgreen.svg)](tests/)
 [![Author](https://img.shields.io/badge/Author-Lemo-orange.svg)](#author--credits)
 
 > **Architected by Lemo**  
@@ -14,7 +14,7 @@
 >
 > **Scope & Capabilities Note:**  
 > - **Gemini Web Only**: The upstream provider is Google Gemini Web exclusively. Foreign models (`gpt-*`, `claude-*`, `deepseek-*`) fail closed with HTTP 404 (`model_not_found`).  
-> - **Pure Text Generation**: Text referencing image URLs (e.g. `https://example.com/logo.png`), CSS styles, HTML tags, and file paths is accepted cleanly. Actual image payloads (Base64 data URIs, markdown image tags `![alt](url)`, structured image objects) are strictly rejected with HTTP 400 (`image_input_unsupported` or `unsupported_content_type`). All vision processing logic has been permanently removed.
+> - **Pure Text Generation**: Text referencing image URLs (e.g. `https://example.com/logo.png`), Markdown image syntax within conversational text/questions/code blocks/backticks, CSS styles, HTML tags, and file paths is accepted cleanly. Actual image payloads (standalone raw markdown image tags `![alt](url)` without surrounding conversational text, Base64 data URIs, structured image objects) are strictly rejected with HTTP 400 (`image_input_unsupported` or `unsupported_content_type`). All vision processing logic has been permanently removed.
 > - **No Silent Model Downgrades**: Quota exhaustion on Pro or Thinking models fails closed with HTTP 429 (`insufficient_quota`) rather than silently downgrading to Flash.
 > - **Production Security**: When `NODE_ENV=production`, `PROXY_API_KEY` is mandatory (server refuses unauthenticated startup or returns 500 `missing_production_api_key`). Default host in development binds safely to `127.0.0.1`.
 
@@ -67,7 +67,7 @@ The proxy exposes neutral, truthful canonical model IDs in `/v1/models` represen
 | `gemini-thinking` | Google Gemini Thinking | `gemini-3-thinking` | ✅ Yes | Deep mathematical, algorithmic, and code reasoning |
 | `gemini-lite` | Google Gemini Lite | `gemini-3-lite` | No | Lightweight tasks and minimal latency |
 
-*Note: Backwards compatibility aliases (`gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.5-thinking`) are fully supported for incoming requests and seamlessly resolve to their respective canonical models.*
+*Note: Only canonical model IDs (`gemini-flash`, `gemini-pro`, `gemini-thinking`, `gemini-lite`) are supported. Misleading legacy aliases (such as `gemini-2.5-*`) have been removed and, along with foreign model identifiers, fail closed with HTTP 404 (`model_not_found`).*
 
 ---
 

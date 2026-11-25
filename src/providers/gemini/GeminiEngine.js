@@ -228,6 +228,91 @@ Instructions for tool calling:
   }
 
   // ---------------------------------------------------------------------------
+  // Fallback and guest execution helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Factory method to create a Guest Gemini client instance.
+   * Can be overridden or spied on in tests to inspect invocation arguments.
+   * @returns {import('gemini-web-sdk').Gemini}
+   */
+  createGuestClient() {
+    return new Gemini({ autoClose: false });
+  }
+
+  /**
+   * Executes Guest Mode fallback on account quota exhaustion with strict model identity enforcement.
+   * If requested model is Model.BASIC_FLASH, falls back to Guest Mode with exact Model.BASIC_FLASH.
+   * If requested model is any non-Flash model (e.g. Pro, Thinking), fails closed with HTTP 429 insufficient_quota.
+   *
+   * @param {Object} params
+   * @param {import('gemini-web-sdk').ModelDef} params.resolvedModel
+   * @param {boolean} params.isGuest
+   * @param {Object} params.generateOpts
+   * @param {AbortSignal} [params.signal]
+   * @param {Error} params.err
+   * @returns {AsyncGenerator<Object>}
+   */
+  async *executeWithFallback({ resolvedModel, isGuest, generateOpts, signal, err }) {
+    const isLimitErr =
+      !isGuest && (
+        err.name === 'UsageLimitExceeded' ||
+        err.message?.includes('not available for your account plan') ||
+        err.message?.includes('Usage limit exceeded')
+      );
+
+    if (!isLimitErr) {
+      throw err;
+    }
+
+    // Enforce model identity integrity: only allow Guest fallback if the requested model is BASIC_FLASH
+    if (resolvedModel === Model.BASIC_FLASH) {
+      logger.warn(`[GeminiEngine] Account plan restriction for Flash (${err.message}). Falling back to Guest Mode (same model)…`);
+
+      const guestClient = this.createGuestClient();
+      try {
+        const guestChat = guestClient.newChat({ model: Model.BASIC_FLASH });
+        const guestStream = await guestChat.generateContentStream(generateOpts);
+
+        for await (const chunk of guestStream) {
+          if (signal?.aborted) return;
+
+          const candidate = chunk.candidates?.find(c => c.index === 0) || chunk.candidates?.[0];
+          if (!candidate) continue;
+
+          if (candidate.thoughts_delta) {
+            yield { type: 'thinking', text: candidate.thoughts_delta };
+          }
+
+          if (candidate.text_delta) {
+            const clean = candidate.text_delta.replace(/https?:\/\/googleusercontent\.com\/[^\s\n]+/gi, '');
+            if (clean) {
+              yield { type: 'content', text: clean };
+            }
+          }
+        }
+      } finally {
+        guestClient.close().catch(() => {});
+      }
+    } else {
+      // Requested model is Pro, Thinking, Lite, etc.
+      // Silently downgrading to Flash is strictly forbidden. Fail closed!
+      logger.error(
+        `[GeminiEngine] Account quota exceeded for requested model '${resolvedModel.model_name}'. ` +
+        `Silent downgrade to Flash is prohibited.`
+      );
+      const quotaErr = new Error(
+        `Account quota or plan limit exceeded for model '${resolvedModel.model_name}'. ` +
+        `Automatic downgrade to another model is disabled to maintain model identity integrity.`
+      );
+      quotaErr.status = 429;
+      quotaErr.code = 'insufficient_quota';
+      quotaErr.type = 'insufficient_quota';
+      throw quotaErr;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Core streaming
   // ---------------------------------------------------------------------------
 
@@ -325,66 +410,7 @@ Instructions for tool calling:
       }
 
     } catch (err) {
-      // Account plan limit → same-model Guest Mode fallback ONLY for Flash
-      const isLimitErr =
-        !isGuest && (
-          err.name === 'UsageLimitExceeded' ||
-          err.message?.includes('not available for your account plan') ||
-          err.message?.includes('Usage limit exceeded')
-        );
-
-      if (isLimitErr) {
-        // Enforce model identity integrity: only allow Guest fallback if the requested model is BASIC_FLASH
-        if (resolvedModel === Model.BASIC_FLASH) {
-          logger.warn(`[GeminiEngine] Account plan restriction for Flash (${err.message}). Falling back to Guest Mode (same model)…`);
-
-          const guestClient = new Gemini({ autoClose: false });
-          try {
-            const guestChat = guestClient.newChat({ model: Model.BASIC_FLASH });
-            const guestStream = await guestChat.generateContentStream(generateOpts);
-
-            for await (const chunk of guestStream) {
-              if (signal?.aborted) return;
-
-              const candidate = chunk.candidates?.find(c => c.index === 0) || chunk.candidates?.[0];
-              if (!candidate) continue;
-
-              if (candidate.thoughts_delta) {
-                yield { type: 'thinking', text: candidate.thoughts_delta };
-              }
-
-              if (candidate.text_delta) {
-                const clean = candidate.text_delta.replace(/https?:\/\/googleusercontent\.com\/[^\s\n]+/gi, '');
-                if (clean) {
-                  hasYieldedContent = true;
-                  yield { type: 'content', text: clean };
-                }
-              }
-            }
-          } finally {
-            guestClient.close().catch(() => {});
-          }
-        } else {
-          // Requested model is Pro, Thinking, Lite, etc.
-          // Silently downgrading to Flash is strictly forbidden. Fail closed!
-          logger.error(
-            `[GeminiEngine] Account quota exceeded for requested model '${resolvedModel.model_name}'. ` +
-            `Silent downgrade to Flash is prohibited.`
-          );
-          const quotaErr = new Error(
-            `Account quota or plan limit exceeded for model '${resolvedModel.model_name}'. ` +
-            `Automatic downgrade to another model is disabled to maintain model identity integrity.`
-          );
-          quotaErr.status = 429;
-          quotaErr.code = 'insufficient_quota';
-          quotaErr.type = 'insufficient_quota';
-          throw quotaErr;
-        }
-
-      } else {
-        throw err;
-      }
-
+      yield* this.executeWithFallback({ resolvedModel, isGuest, generateOpts, signal, err });
     } finally {
       if (abortListener && signal) {
         signal.removeEventListener('abort', abortListener);

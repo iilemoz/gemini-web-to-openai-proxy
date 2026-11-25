@@ -268,9 +268,9 @@ test('GeminiProvider: implements ProviderAdapter interface correctly', () => {
   assert.ok(models.some(m => m.id === 'gemini-thinking'));
   assert.ok(models.some(m => m.id === 'gemini-lite'));
 
-  // Test supportsModel explicit matching
+  // Test supportsModel explicit matching (canonical models supported, misleading aliases rejected)
   assert.equal(gemini.supportsModel('gemini-flash'), true);
-  assert.equal(gemini.supportsModel('gemini-2.5-flash'), true);
+  assert.equal(gemini.supportsModel('gemini-2.5-flash'), false);
   assert.equal(gemini.supportsModel('gemini-pro'), true);
   assert.equal(gemini.supportsModel('non-gemini-model'), false);
 
