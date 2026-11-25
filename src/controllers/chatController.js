@@ -85,6 +85,27 @@ export async function handleChatCompletion(req, res) {
     }));
   }
 
+  const isToolChoiceNone = tool_choice === 'none' || function_call === 'none';
+  const hasTools = !isToolChoiceNone && effectiveTools.length > 0;
+
+  // Validate specific function selection in tool_choice if provided
+  if (tool_choice && typeof tool_choice === 'object') {
+    const specifiedName = tool_choice.function?.name || tool_choice.name;
+    if (specifiedName && effectiveTools.length > 0) {
+      const exists = effectiveTools.some(t => (t.function?.name || t.name) === specifiedName);
+      if (!exists) {
+        return res.status(400).json({
+          error: {
+            message: `Invalid tool_choice: tool '${specifiedName}' is not present in tools list.`,
+            type: 'invalid_request_error',
+            param: 'tool_choice',
+            code: 'invalid_tool_choice'
+          }
+        });
+      }
+    }
+  }
+
   // ── Basic validation ───────────────────────────────────────────────────────
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({
@@ -98,7 +119,6 @@ export async function handleChatCompletion(req, res) {
 
   // ── Feature flags and capabilities ─────────────────────────────────────────
   const includeUsage  = stream_options?.include_usage === true;
-  const hasTools      = effectiveTools.length > 0;
   const isJsonFormat  = Boolean(
     req.body.response_format &&
     (req.body.response_format.type === 'json_object' || req.body.response_format.type === 'json_schema')
@@ -193,8 +213,8 @@ export async function handleChatCompletion(req, res) {
         messages,
         stream: true,
         token,
-        tools: effectiveTools,
-        tool_choice,
+        tools: isToolChoiceNone ? [] : effectiveTools,
+        tool_choice: isToolChoiceNone ? 'none' : tool_choice,
         response_format,
         stop,
         temperature,
@@ -215,7 +235,7 @@ export async function handleChatCompletion(req, res) {
       res.write(formatSSEChunk(completionId, model, { role: 'assistant' }));
 
       // Regex that detects the beginning of a tool-call block
-      const toolTagRegex = /(?:[<＜]\s*[|｜]\s*(?:[|｜]\s*)?DSML\s*[|｜]\s*(?:[|｜]\s*)?calls|<tool_call>)/i;
+      const toolTagRegex = /(?:[<＜]\s*[|｜]\s*(?:[|｜]\s*)?DSML\s*[|｜]\s*(?:[|｜]\s*)?calls|<\s*tool_call\s*>)/i;
 
       let chunkCount        = 0;
       let completionChars   = 0;
@@ -241,8 +261,22 @@ export async function handleChatCompletion(req, res) {
 
         // Native tool calls from provider
         if (chunkType === 'tool_calls') {
-          res.write(formatSSEChunk(completionId, model, { tool_calls: rawChunk.tool_calls }));
-          chunkCount++;
+          if (isToolChoiceNone) {
+            continue;
+          }
+          const rawCalls = Array.isArray(rawChunk.tool_calls) ? rawChunk.tool_calls : [rawChunk.tool_calls];
+          for (let i = 0; i < rawCalls.length; i++) {
+            const tc = rawCalls[i];
+            const tcWithIndex = {
+              index: typeof tc.index === 'number' ? tc.index : i
+            };
+            if (tc.id) tcWithIndex.id = tc.id;
+            if (tc.type) tcWithIndex.type = tc.type;
+            if (tc.function) tcWithIndex.function = tc.function;
+
+            res.write(formatSSEChunk(completionId, model, { tool_calls: [tcWithIndex] }, null));
+            chunkCount++;
+          }
           hasNativeToolCalls = true;
           continue;
         }
@@ -265,8 +299,8 @@ export async function handleChatCompletion(req, res) {
 
         completionChars += chunkText.length;
 
-        // Direct path when no tools are present
-        if (!hasTools) {
+        // Direct path when no tools are present or tool_choice is none
+        if (!hasTools || isToolChoiceNone) {
           stopFilter.push(chunkText);
           if (stopFilter.isStopped()) {
             break;
@@ -326,17 +360,35 @@ export async function handleChatCompletion(req, res) {
       // Emit parsed tool calls (or stop)
       if (stopFilter.isStopped()) {
         res.write(formatSSEChunk(completionId, model, {}, 'stop'));
-      } else if (hasNativeToolCalls) {
+      } else if (hasNativeToolCalls && !isToolChoiceNone) {
         res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
-      } else if (dsmlBuffer) {
+      } else if (dsmlBuffer && !isToolChoiceNone) {
         const { content: afterContent, toolCalls } = parseDSML(dsmlBuffer);
 
         if (afterContent) {
-          res.write(formatSSEChunk(completionId, model, { content: afterContent }));
+          res.write(formatSSEChunk(completionId, model, { content: afterContent }, null));
+          chunkCount++;
         }
 
         if (toolCalls && toolCalls.length > 0) {
-          res.write(formatSSEChunk(completionId, model, { tool_calls: toolCalls }, 'tool_calls'));
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            res.write(formatSSEChunk(completionId, model, {
+              tool_calls: [
+                {
+                  index: i,
+                  id: tc.id,
+                  type: tc.type || 'function',
+                  function: {
+                    name: tc.function.name,
+                    arguments: tc.function.arguments
+                  }
+                }
+              ]
+            }, null));
+            chunkCount++;
+          }
+          res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
         } else {
           res.write(formatSSEChunk(completionId, model, {}, 'stop'));
         }
@@ -372,8 +424,8 @@ export async function handleChatCompletion(req, res) {
             messages,
             stream: false,
             token,
-            tools: effectiveTools,
-            tool_choice,
+            tools: isToolChoiceNone ? [] : effectiveTools,
+            tool_choice: isToolChoiceNone ? 'none' : tool_choice,
             response_format,
             stop,
             temperature,
@@ -413,17 +465,24 @@ export async function handleChatCompletion(req, res) {
           let finalToolCalls = nativeToolCalls || [];
 
           if (!nativeToolCalls) {
-            const parsed = parseDSML(fullContent);
-            finalContent = parsed.content;
-            finalToolCalls = parsed.toolCalls;
+            if (isToolChoiceNone) {
+              finalContent = fullContent;
+              finalToolCalls = [];
+            } else {
+              const parsed = parseDSML(fullContent);
+              finalContent = parsed.content;
+              finalToolCalls = parsed.toolCalls;
 
-            if (isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
-              logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
-              const err = new Error(`Upstream model error: ${parsed.content}`);
-              err.status = 502;
-              err.code = 'model_error';
-              throw err;
+              if (isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
+                logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
+                const err = new Error(`Upstream model error: ${parsed.content}`);
+                err.status = 502;
+                err.code = 'model_error';
+                throw err;
+              }
             }
+          } else if (isToolChoiceNone) {
+            finalToolCalls = [];
           }
 
           if (stop && finalContent) {

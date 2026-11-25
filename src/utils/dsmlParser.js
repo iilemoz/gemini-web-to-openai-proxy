@@ -29,8 +29,8 @@ export function parseDSML(text) {
   let content = text;
 
   // 1. Check for <tool_call>...</tool_call> or unclosed <tool_call> blocks
-  const toolCallRegex = /<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/gi;
-  if (/<tool_call>/i.test(content)) {
+  const toolCallRegex = /<\s*tool_call\s*>([\s\S]*?)(?:<\/\s*tool_call\s*>|(?=<\s*tool_call\s*>)|$)/gi;
+  if (/<\s*tool_call\s*>/i.test(content)) {
     let match;
     while ((match = toolCallRegex.exec(text)) !== null) {
       const rawBlock = match[1].trim();
@@ -41,33 +41,46 @@ export function parseDSML(text) {
         const cleanJson = rawBlock.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
         const parsed = JSON.parse(cleanJson);
 
-        const name = parsed.name || parsed.function?.name || parsed.tool_name || parsed.tool;
-        if (name) {
-          let argsObj = parsed.arguments || parsed.parameters || {};
-          if (typeof argsObj !== 'string') {
-            argsObj = JSON.stringify(argsObj);
-          }
-
-          toolCalls.push({
-            id: `call_${crypto.randomBytes(12).toString('hex')}`,
-            type: 'function',
-            function: {
-              name: String(name).trim(),
-              arguments: argsObj
+        const items = Array.isArray(parsed) ? parsed : [parsed];
+        for (const item of items) {
+          if (!item || typeof item !== 'object') continue;
+          const name = item.name || item.function?.name || item.tool_name || item.tool;
+          if (name) {
+            let argsObj = item.arguments !== undefined ? item.arguments : (item.parameters !== undefined ? item.parameters : {});
+            if (typeof argsObj !== 'string') {
+              argsObj = JSON.stringify(argsObj);
             }
-          });
+
+            toolCalls.push({
+              id: `call_${crypto.randomBytes(12).toString('hex')}`,
+              type: 'function',
+              function: {
+                name: String(name).trim(),
+                arguments: argsObj
+              }
+            });
+          }
         }
       } catch {
         // Fallback: extract name and arguments via regex if direct parse fails
         const nameMatch = rawBlock.match(/"name"\s*:\s*"([^"]+)"/);
-        const argsMatch = rawBlock.match(/"arguments"\s*:\s*(\{[\s\S]*\})/);
+        const argsMatch = rawBlock.match(/"(?:arguments|parameters)"\s*:\s*(\{[\s\S]*\}|"[^"]*")/);
         if (nameMatch) {
+          let argsStr = '{}';
+          if (argsMatch) {
+            argsStr = argsMatch[1];
+            if (argsStr.startsWith('"') && argsStr.endsWith('"')) {
+              try {
+                argsStr = JSON.parse(argsStr);
+              } catch {}
+            }
+          }
           toolCalls.push({
             id: `call_${crypto.randomBytes(12).toString('hex')}`,
             type: 'function',
             function: {
               name: nameMatch[1],
-              arguments: argsMatch ? argsMatch[1] : '{}'
+              arguments: argsStr
             }
           });
         }
@@ -75,7 +88,7 @@ export function parseDSML(text) {
     }
 
     // Strip tool_call tags from content
-    content = content.replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/gi, '').trim();
+    content = content.replace(/<\s*tool_call\s*>[\s\S]*?(?:<\/\s*tool_call\s*>|(?=<\s*tool_call\s*>)|$)/gi, '').trim();
   }
 
   // 2. Also check for DSML calls if present

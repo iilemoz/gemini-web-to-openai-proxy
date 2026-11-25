@@ -104,10 +104,12 @@ export class GeminiEngine {
    * Formats tool definitions into a system-level instruction block that
    * instructs Gemini to respond with <tool_call> JSON when needed.
    * @param {Array<Object>} tools - OpenAI-format tool definitions.
+   * @param {*} [tool_choice] - Optional tool_choice constraint.
    * @returns {string}
    */
-  formatToolsInstruction(tools) {
+  formatToolsInstruction(tools, tool_choice = 'auto') {
     if (!Array.isArray(tools) || tools.length === 0) return '';
+    if (tool_choice === 'none') return '';
 
     const toolDefs = tools.map(t => {
       const fn = t.function || t;
@@ -117,6 +119,18 @@ export class GeminiEngine {
         parameters: fn.parameters || {}
       };
     });
+
+    let extraInstruction = '';
+    let requiredToolName = null;
+    if (tool_choice && typeof tool_choice === 'object') {
+      requiredToolName = tool_choice.function?.name || tool_choice.name;
+    }
+
+    if (requiredToolName) {
+      extraInstruction = `\n- MANDATORY: For this request, you MUST invoke the tool "${requiredToolName}". Do not respond without invoking this tool.`;
+    } else if (tool_choice === 'required') {
+      extraInstruction = `\n- MANDATORY: For this request, you MUST invoke at least one of the available tools.`;
+    }
 
     return `\n[TOOL CALLING PIPELINE]
 You are an autonomous AI coding assistant integrated with an active tool execution pipeline in VS Code.
@@ -134,7 +148,7 @@ Instructions for tool calling:
 <tool_call>
 {"name": "tool_name", "arguments": {"param1": "value1"}}
 </tool_call>
-- You may include a brief sentence before or after the tool call explaining what you are doing.`;
+- You may include a brief sentence before or after the tool call explaining what you are doing.${extraInstruction}`;
   }
 
   /**
@@ -155,14 +169,16 @@ Instructions for tool calling:
         .map(p => (typeof p === 'string' ? p : p?.text || ''))
         .filter(Boolean)
         .join('\n');
+    } else if (msg.content !== undefined && msg.content !== null) {
+      text = typeof msg.content === 'object' ? JSON.stringify(msg.content) : String(msg.content);
     }
 
     // If the assistant message carries previous tool_calls, replay them so the
     // model understands the conversation history.
     if (msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
       for (const tc of msg.tool_calls) {
-        const fnName = tc.function?.name || 'tool';
-        let fnArgs = tc.function?.arguments || '{}';
+        const fnName = tc.function?.name || tc.name || 'tool';
+        let fnArgs = tc.function?.arguments ?? tc.arguments ?? '{}';
         try {
           if (typeof fnArgs === 'string') fnArgs = JSON.parse(fnArgs);
         } catch { /* leave as-is if unparseable */ }
@@ -179,9 +195,10 @@ Instructions for tool calling:
    * turns follow in User / Model / Tool Result order.
    * @param {Array<{role: string, content: string|Array}>} messages
    * @param {Array<Object>} [tools]
+   * @param {*} [tool_choice]
    * @returns {string}
    */
-  formatPrompt(messages, tools = []) {
+  formatPrompt(messages, tools = [], tool_choice = 'auto') {
     if (!Array.isArray(messages) || messages.length === 0) return '';
 
     // Drop empty / invalid messages
@@ -197,11 +214,12 @@ Instructions for tool calling:
     const systemMessages  = validMessages.filter(m => m.role === 'system' || m.role === 'developer');
     const conversation    = validMessages.filter(m => m.role !== 'system' && m.role !== 'developer');
 
-    const hasTools        = Array.isArray(tools) && tools.length > 0;
+    const isNone          = tool_choice === 'none';
+    const hasTools        = !isNone && Array.isArray(tools) && tools.length > 0;
     const baseInstruction = hasTools
       ? 'Do not output audio widget links or media tokens.'
       : 'Respond in plain text or markdown directly. Do not output audio widget links or media tokens.';
-    const toolsInstruction = this.formatToolsInstruction(tools);
+    const toolsInstruction = hasTools ? this.formatToolsInstruction(tools, tool_choice) : '';
 
     const systemParts = [baseInstruction];
     if (systemMessages.length > 0) {
@@ -337,10 +355,10 @@ Instructions for tool calling:
    * @param {AbortSignal} [params.signal]  - Abort signal for early cancellation.
    * @yields {{ type: string, text: string }}
    */
-  async *streamChat({ model, messages, token, tools = [], signal }) {
+  async *streamChat({ model, messages, token, tools = [], tool_choice, signal }) {
     const { client, isTemporary } = this.getClient(token);
     const resolvedModel = this.resolveModel(model);
-    const prompt = this.formatPrompt(messages, tools);
+    const prompt = this.formatPrompt(messages, tools, tool_choice);
 
     if (!prompt) {
       logger.warn('[GeminiEngine] Prompt is empty after filtering messages.');

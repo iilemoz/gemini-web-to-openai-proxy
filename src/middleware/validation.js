@@ -13,7 +13,10 @@ export function validateChatCompletionRequest(req, res, next) {
     max_completion_tokens,
     stop,
     response_format,
-    model
+    model,
+    tools,
+    functions,
+    tool_choice
   } = req.body || {};
 
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -165,6 +168,38 @@ export function validateChatCompletionRequest(req, res, next) {
           type: 'invalid_request_error',
           param: 'response_format',
           code: 'invalid_response_format'
+        }
+      });
+    }
+  }
+
+  // Tool choice validation
+  if (tool_choice !== undefined && tool_choice !== null) {
+    const isValidString = typeof tool_choice === 'string' && ['none', 'auto', 'required'].includes(tool_choice);
+    const isValidObject = typeof tool_choice === 'object' && !Array.isArray(tool_choice) && (
+      (tool_choice.type === 'function' && tool_choice.function && typeof tool_choice.function.name === 'string') ||
+      (typeof tool_choice.name === 'string')
+    );
+
+    if (!isValidString && !isValidObject) {
+      return res.status(400).json({
+        error: {
+          message: "Invalid tool_choice: must be 'none', 'auto', 'required', or a function object.",
+          type: 'invalid_request_error',
+          param: 'tool_choice',
+          code: 'invalid_tool_choice'
+        }
+      });
+    }
+
+    const hasTools = (Array.isArray(tools) && tools.length > 0) || (Array.isArray(functions) && functions.length > 0);
+    if ((tool_choice === 'required' || isValidObject) && !hasTools) {
+      return res.status(400).json({
+        error: {
+          message: "Invalid tool_choice: 'tool_choice' requires 'tools' to be provided.",
+          type: 'invalid_request_error',
+          param: 'tool_choice',
+          code: 'invalid_tool_choice'
         }
       });
     }

@@ -60,8 +60,10 @@ export function formatSSEChunk(id, model, delta = {}, finishReason = null) {
  * @param {number} opts.completionTokens
  * @returns {string} Formatted SSE line ending with '\n\n'.
  */
-export function formatSSEUsageChunk(id, model, { promptTokens = 0, completionTokens = 0 }) {
-  const totalTokens = promptTokens + completionTokens;
+export function formatSSEUsageChunk(id, model, opts = {}) {
+  const promptTokens = opts.prompt_tokens ?? opts.promptTokens ?? 0;
+  const completionTokens = opts.completion_tokens ?? opts.completionTokens ?? 0;
+  const totalTokens = opts.total_tokens ?? opts.totalTokens ?? (promptTokens + completionTokens);
 
   const payload = {
     id,
