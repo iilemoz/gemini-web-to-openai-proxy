@@ -288,37 +288,17 @@ For complete setup, evaluation examples, and benchmark execution instructions, s
 
 ---
 
-## 💻 IDE Integration Quick Guides
+## 💻 IDE Integration Guides
 
-### Cursor
-1. Go to **Settings** > **Features** > **AI Models**.
-2. Set **OpenAI Base URL** to `http://localhost:3000/v1`.
-3. Set **OpenAI API Key** to any string (or your `PROXY_API_KEY`).
-4. Select `gemini-flash` or `gemini-pro`.
+Comprehensive, verified integration guides and configuration profiles are available in [`docs/ide-integrations/`](docs/ide-integrations/README.md):
 
-### Continue (VS Code & JetBrains)
-In your `~/.continue/config.json`:
-```json
-{
-  "models": [
-    {
-      "title": "Gemini Flash (Local Proxy)",
-      "provider": "openai",
-      "model": "gemini-flash",
-      "apiBase": "http://localhost:3000/v1",
-      "apiKey": "any-string"
-    }
-  ]
-}
-```
-
-### Cline / Roo-Code
-1. Choose **OpenAI Compatible** provider.
-2. Base URL: `http://localhost:3000/v1`.
-3. Model ID: `gemini-flash`.
-4. API Key: `any-string` (or `PROXY_API_KEY`).
-
-For additional IDE configurations (Aider, Claude Dev, etc.), see [docs/IDE_COMPATIBILITY.md](file:///c:/Users/Ahmed/Desktop/Gemini-web-to-openai-proxy%202027/docs/IDE_COMPATIBILITY.md).
+- 🎯 **[Cursor Integration Guide](docs/ide-integrations/cursor.md)**: Chat, Composer, and base URL override.
+- 🚀 **[Continue.dev Integration Guide](docs/ide-integrations/continue.md)**: Config setup for VS Code/JetBrains (Chat & Inline Edit).
+- 🤖 **[Cline Integration Guide](docs/ide-integrations/cline.md)**: Autonomous agent tool calling and multi-turn workflows.
+- 🦘 **[Roo Code Integration Guide](docs/ide-integrations/roo-code.md)**: Multi-mode setup (Code, Architect, Ask).
+- 📊 **[Compatibility Matrix](docs/ide-integrations/compatibility-matrix.md)**: Feature support, model catalog, and limitations.
+- 🔒 **[Security & Authentication Guide](docs/ide-integrations/security.md)**: Safe session cookie handling and API key setup.
+- 🛠️ **[Troubleshooting Guide](docs/ide-integrations/troubleshooting.md)**: Solutions for common connection and upstream errors.
 
 ---
 
