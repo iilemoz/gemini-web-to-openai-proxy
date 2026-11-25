@@ -15,7 +15,7 @@ test('DevTools are registered in ToolRegistry', () => {
 test('DevTools: search_code finds code matches in workspace', async () => {
   const result = await toolDispatcher.dispatch({
     name: 'search_code',
-    arguments: { pattern: 'gemini-web-to-openai-proxy' }
+    arguments: { pattern: 'gemini-web-to-openai-proxy', maxResults: 300 }
   });
 
   assert.equal(result.is_error, false);

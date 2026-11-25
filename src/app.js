@@ -1,12 +1,15 @@
 import express from 'express';
-import cors from 'cors';
 import { v1Router } from './routes/v1.js';
 import { dashboardRouter } from './dashboard/dashboardRouter.js';
 import { logger } from './utils/logger.js';
-import { config } from './config/index.js';
 import { requestTracker } from './utils/requestTracker.js';
+import { securityHeaders } from './middleware/securityHeaders.js';
+import { createCorsMiddleware } from './middleware/corsConfig.js';
 
 export const app = express();
+
+// Apply defensive HTTP security response headers
+app.use(securityHeaders);
 
 // Reject new incoming requests during graceful shutdown
 app.use((req, res, next) => {
@@ -22,12 +25,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middlewares
-app.use(cors({ origin: config.corsOrigin }));
+// Production-hardened CORS middleware
+app.use(createCorsMiddleware());
+
+// Body parsing with safe size bounds
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
+// Request logging middleware (logs method & path without sensitive request bodies)
 app.use((req, res, next) => {
   logger.info(`${req.method} ${req.originalUrl}`);
   next();

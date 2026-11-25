@@ -3,6 +3,7 @@ import { app } from './app.js';
 import { config } from './config/index.js';
 import { logger } from './utils/logger.js';
 import { requestTracker } from './utils/requestTracker.js';
+import { stopRateLimiterCleanup } from './middleware/rateLimiter.js';
 
 const banner = `
 ===========================================================
@@ -23,6 +24,7 @@ export async function gracefulShutdown(serverInstance = server, gracePeriodMs = 
   if (requestTracker.isShuttingDown) return;
   logger.info(`Starting graceful shutdown (grace period: ${gracePeriodMs}ms)...`);
   requestTracker.startShutdown();
+  stopRateLimiterCleanup();
 
   if (serverInstance && serverInstance.close) {
     serverInstance.close(() => {
