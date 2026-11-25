@@ -155,12 +155,12 @@ For developers running interactive desktop IDE sessions, follow these exact setu
        provider: openai
        model: gemini-flash
        apiBase: http://127.0.0.1:3000/v1
-       apiKey: "sk-continue-local"
+       apiKey: "YOUR_PROXY_API_KEY"
      - name: "Gemini Pro (Proxy)"
        provider: openai
        model: gemini-pro
        apiBase: http://127.0.0.1:3000/v1
-       apiKey: "sk-continue-local"
+       apiKey: "YOUR_PROXY_API_KEY"
    ```
 3. Open VS Code, press `Ctrl + L` / `Cmd + L` to open the Continue panel, and send:
    `"Explain the difference between synchronous and asynchronous I/O in Node.js."`
@@ -171,7 +171,7 @@ For developers running interactive desktop IDE sessions, follow these exact setu
 2. Click **Settings (gear icon)**:
    - **API Provider**: `OpenAI Compatible`
    - **Base URL**: `http://127.0.0.1:3000/v1`
-   - **API Key**: `sk-cline-local` (or your `PROXY_API_KEY`)
+   - **API Key**: `YOUR_PROXY_API_KEY`
    - **Model ID**: `gemini-flash` (or `gemini-pro`)
 3. In Cline chat, enter:
    `"Inspect the package.json file in this workspace and tell me the main dependencies."`
@@ -181,7 +181,7 @@ For developers running interactive desktop IDE sessions, follow these exact setu
 1. Open VS Code and click the **Roo Code icon**.
 2. Select **OpenAI Compatible** provider:
    - **Base URL**: `http://127.0.0.1:3000/v1`
-   - **API Key**: `sk-roo-code-local`
+   - **API Key**: `YOUR_PROXY_API_KEY`
    - **Model ID**: `gemini-flash` for Code Mode; `gemini-thinking` for Ask Mode.
 3. Test Ask Mode with: `"What is Server-Sent Events (SSE)?"`
 

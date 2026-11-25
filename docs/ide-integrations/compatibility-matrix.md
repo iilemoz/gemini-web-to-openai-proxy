@@ -12,15 +12,15 @@
 The table below summarizes the compatibility of external IDEs and AI coding agents with this proxy.
 
 > **Verification Level Definitions:**
-> - **Protocol Verified**: Request/response contracts, streaming chunk structures (SSE), tool-call indexing, and error codes are 100% verified against deterministic regression test suites.
+> - **API PASS**: Request/response contracts, streaming chunk structures (SSE), tool-call indexing (GAP-01/02), error codes, and capability enforcement are 100% verified against deterministic regression test suites.
 > - **Configuration Verified**: Configuration parameters, settings schemas, and provider mapping match the official IDE documentation and extension schemas.
-> - **Live IDE End-to-End**: Verified during interactive developer sessions with actual running extensions (requires valid Google session cookies for live upstream).
+> - **NOT TESTED (GUI)**: Interactive GUI extension actions (clicking in VS Code UI panels) were not automated in headless CI; verified via manual configuration recipes and deterministic API mocks.
 
-| IDE / Extension | Configuration Verified | Protocol Verified | Streaming (SSE) | Tool Calling | Multi-Turn Interaction | Live IDE Status | Known Unsupported Features |
+| IDE / Extension | Configuration Verified | Protocol Verified | Streaming (SSE) | Tool Calling | Multi-Turn Interaction | Live IDE GUI Status | Known Unsupported Features |
 |:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
-| **Continue.dev** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Chat & Inline Edit) | Tab Autocomplete FIM (relies on missing `/v1/completions`); Image inputs |
-| **Cline** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Protocol Level) | Browser screenshot / visual inspection; Image inputs |
-| **Roo Code** | ✅ Yes | ✅ Yes | ✅ Supported | ✅ Supported | ✅ Supported | Verified (Protocol Level) | Image/vision analysis; Image inputs |
+| **Continue.dev** | ✅ Yes | ✅ Yes (`API PASS`) | ✅ Supported | ✅ Supported | ✅ Supported | `NOT TESTED` *(Headless CI; Manual Verified)* | Tab Autocomplete FIM (relies on missing `/v1/completions`); Image inputs |
+| **Cline** | ✅ Yes | ✅ Yes (`API PASS`) | ✅ Supported | ✅ Supported | ✅ Supported | `NOT TESTED` *(Headless CI; Manual Verified)* | Browser screenshot / visual inspection; Image inputs |
+| **Roo Code** | ✅ Yes | ✅ Yes (`API PASS`) | ✅ Supported | ✅ Supported | ✅ Supported | `NOT TESTED` *(Extension not installed)* | Image/vision analysis; Image inputs |
 
 ---
 

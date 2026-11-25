@@ -29,7 +29,7 @@ Roo Code extends autonomous agent workflows by providing distinct operational mo
      http://localhost:3000/v1
      ```
    - **API Key**:
-     Enter your `PROXY_API_KEY` from `.env` (or a placeholder like `sk-roo-code-local` in development mode).
+     Enter `YOUR_PROXY_API_KEY` (matches `PROXY_API_KEY` in `.env`, or any placeholder string in open development mode).
    - **Model ID**:
      Configure a canonical model ID based on the active mode:
      - For **Code Mode**: `gemini-flash` (fastest iteration) or `gemini-pro` (tools supported).
