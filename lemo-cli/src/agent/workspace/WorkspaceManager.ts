@@ -9,6 +9,13 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { SecurityError, WorkspaceError, ToolError } from '../../core/errors/index.js';
 import type { DestinationIdentity } from '../tools/Tool.js';
+import {
+  type FilesystemCapabilities,
+  PlatformCapabilityRegistry
+} from './PlatformCapabilities.js';
+
+export type { FilesystemCapabilities };
+export { PlatformCapabilityRegistry };
 
 export interface WorkspaceIdentity {
   canonicalPath: string;
@@ -39,11 +46,13 @@ export function isPathInside(parentPath: string, childPath: string): boolean {
 
 export interface WorkspaceManagerOptions {
   allowSensitiveFiles?: boolean;
+  capabilities?: Partial<FilesystemCapabilities> | undefined;
 }
 
 export class WorkspaceManager {
   private readonly root: string;
   private readonly allowSensitiveFiles: boolean;
+  private readonly capabilities: FilesystemCapabilities;
 
   constructor(workspaceRoot: string = process.cwd(), options: WorkspaceManagerOptions = {}) {
     this.allowSensitiveFiles = options.allowSensitiveFiles ?? false;
@@ -67,6 +76,19 @@ export class WorkspaceManager {
       if (err instanceof WorkspaceError) throw err;
       throw new WorkspaceError(`Failed to initialize workspace root '${resolved}': ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    const probed = PlatformCapabilityRegistry.probe(this.root);
+    this.capabilities = {
+      ...probed,
+      ...(options.capabilities ?? {})
+    };
+  }
+
+  /**
+   * Returns the probed or configured filesystem capabilities for this workspace.
+   */
+  public getCapabilities(): Readonly<FilesystemCapabilities> {
+    return this.capabilities;
   }
 
   /**
@@ -650,6 +672,15 @@ export class WorkspaceManager {
 
     if (stat.isFile()) {
       const bytesDeleted = stat.size;
+      // Revalidate target file identity immediately before unlinking
+      const preUnlinkStat = await fs.promises.lstat(canonical);
+      if (
+        !preUnlinkStat.isFile() ||
+        Number(preUnlinkStat.ino) !== Number(stat.ino) ||
+        Number(preUnlinkStat.dev) !== Number(stat.dev)
+      ) {
+        throw new SecurityError('Target file identity changed prior to unlinking in delete operation');
+      }
       await fs.promises.unlink(canonical);
       return { type: 'file', bytesDeleted };
     }
@@ -668,6 +699,7 @@ export class WorkspaceManager {
     options?: {
       overwrite?: boolean | undefined;
       expectedDestIdentity?: DestinationIdentity | undefined;
+      expectedDestContentHash?: string | undefined;
       directoryMovePolicy?: 'strict' | 'standard' | undefined;
     }
   ): Promise<{ type: 'file' | 'directory' | 'symlink'; bytesMoved?: number }> {
@@ -722,6 +754,12 @@ export class WorkspaceManager {
 
     // Directory relocation
     if (sourceStat.isDirectory()) {
+      if (!this.capabilities.atomicDirectoryNoReplace) {
+        throw new SecurityError(
+          "Directory relocation disabled: atomic no-replace capability ('atomicDirectoryNoReplace' via renameat2/renamex_np) is unavailable on this platform/runtime"
+        );
+      }
+
       this.assertNotDescendant(canonicalSource, canonicalDest);
 
       if (destExists) {
@@ -786,30 +824,90 @@ export class WorkspaceManager {
         if (destStat?.isSymbolicLink()) {
           throw new SecurityError(`Refusing to overwrite symlink destination: '${this.toRelative(canonicalDest)}'`);
         }
-
-        // Revalidate destination identity immediately before atomic overwrite rename
-        const preRenameDestStat = await fs.promises.lstat(canonicalDest);
-        if (
-          !preRenameDestStat.isFile() ||
-          (options?.expectedDestIdentity?.inodeNumber !== undefined &&
-            Number(preRenameDestStat.ino) !== options.expectedDestIdentity.inodeNumber) ||
-          (options?.expectedDestIdentity?.deviceNumber !== undefined &&
-            Number(preRenameDestStat.dev) !== options.expectedDestIdentity.deviceNumber)
-        ) {
-          throw new SecurityError('Destination file identity changed prior to overwrite rename');
+        if (!this.capabilities.safeDestinationOverwrite) {
+          throw new SecurityError(
+            "Safe destination overwrite disabled: verified displacement/staging capability ('safeDestinationOverwrite') is unavailable"
+          );
         }
 
-        // Revalidate source identity before atomic overwrite rename
-        const currentSourceStat = await fs.promises.lstat(canonicalSource);
-        if (
-          !currentSourceStat.isFile() ||
-          Number(currentSourceStat.ino) !== Number(sourceStat.ino) ||
-          Number(currentSourceStat.dev) !== Number(sourceStat.dev)
-        ) {
-          throw new SecurityError('Source file identity changed prior to overwrite rename');
+        // Verified displacement and staging strategy:
+        // Displace the approved destination to a temporary nonce location in the same directory.
+        // This eliminates TOCTOU races between identity check and overwrite rename.
+        const destDir = path.dirname(canonicalDest);
+        const nonce = crypto.randomBytes(8).toString('hex');
+        const displacedPath = path.join(destDir, `.lemo_bkp_${path.basename(canonicalDest)}_${nonce}.tmp`);
+        WorkspaceManager.activeGlobalTempFiles.add(displacedPath);
+
+        try {
+          await fs.promises.rename(canonicalDest, displacedPath);
+        } catch (displaceErr: unknown) {
+          WorkspaceManager.activeGlobalTempFiles.delete(displacedPath);
+          throw new SecurityError(
+            `Failed to stage destination file for verified overwrite: ${displaceErr instanceof Error ? displaceErr.message : String(displaceErr)}`
+          );
         }
-        // Overwrite via atomic rename
-        await fs.promises.rename(canonicalSource, canonicalDest);
+
+        let destinationVerified = false;
+        try {
+          // Inspect displaced destination object
+          const displacedStat = await fs.promises.lstat(displacedPath);
+          if (!displacedStat.isFile()) {
+            throw new SecurityError('Displaced destination object is not a regular file');
+          }
+          if (
+            options?.expectedDestIdentity?.inodeNumber !== undefined &&
+            Number(displacedStat.ino) !== options.expectedDestIdentity.inodeNumber
+          ) {
+            throw new SecurityError('Destination file identity changed prior to overwrite rename (displacement verification failed)');
+          }
+          if (
+            options?.expectedDestIdentity?.deviceNumber !== undefined &&
+            Number(displacedStat.dev) !== options.expectedDestIdentity.deviceNumber
+          ) {
+            throw new SecurityError('Destination file device changed prior to overwrite rename (displacement verification failed)');
+          }
+          if (options?.expectedDestContentHash !== undefined) {
+            const displacedBuf = await fs.promises.readFile(displacedPath);
+            const actualHash = crypto.createHash('sha256').update(displacedBuf).digest('hex');
+            if (actualHash !== options.expectedDestContentHash) {
+              throw new SecurityError('Destination file content changed prior to overwrite displacement');
+            }
+          }
+
+          // Inspect source before committing rename
+          const currentSourceStat = await fs.promises.lstat(canonicalSource);
+          if (
+            !currentSourceStat.isFile() ||
+            Number(currentSourceStat.ino) !== Number(sourceStat.ino) ||
+            Number(currentSourceStat.dev) !== Number(sourceStat.dev)
+          ) {
+            throw new SecurityError('Source file identity changed prior to overwrite rename');
+          }
+
+          // Commit source to destination
+          await fs.promises.rename(canonicalSource, canonicalDest);
+          destinationVerified = true;
+        } catch (stageErr: unknown) {
+          // Rollback displaced destination if destination wasn't successfully replaced
+          if (!destinationVerified) {
+            try {
+              await fs.promises.rename(displacedPath, canonicalDest);
+            } catch {
+              // Rollback failed; preserve displaced path for manual recovery
+            }
+          }
+          throw stageErr;
+        } finally {
+          if (destinationVerified) {
+            try {
+              await fs.promises.unlink(displacedPath);
+            } catch {
+              // Nonce temp file will be cleaned up by sweep
+            }
+          }
+          WorkspaceManager.activeGlobalTempFiles.delete(displacedPath);
+        }
+
         return { type: 'file', bytesMoved: sourceStat.size };
       } else {
         // Destination does not exist.
@@ -819,6 +917,11 @@ export class WorkspaceManager {
 
         // For non-overwrite, guarantee race safety via atomic hard link where supported
         if (options?.overwrite !== true) {
+          if (!this.capabilities.secureFileRelocation) {
+            throw new SecurityError(
+              "Race-safe file relocation disabled: hardlink capability ('secureFileRelocation') is unavailable"
+            );
+          }
           try {
             await fs.promises.link(canonicalSource, canonicalDest);
             // Source identity validation immediately before unlinking
@@ -828,7 +931,9 @@ export class WorkspaceManager {
               Number(preUnlinkStat.ino) !== Number(sourceStat.ino) ||
               Number(preUnlinkStat.dev) !== Number(sourceStat.dev)
             ) {
-              throw new SecurityError('Source file identity changed prior to unlinking in move operation');
+              throw new SecurityError(
+                `Source file identity changed prior to unlinking in move operation (destination hardlink preserved at '${this.toRelative(canonicalDest)}'; source entry unlinking aborted to prevent data loss; manual reconciliation required)`
+              );
             }
             await fs.promises.unlink(canonicalSource);
             return { type: 'file', bytesMoved: sourceStat.size };

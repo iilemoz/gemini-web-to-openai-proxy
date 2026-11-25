@@ -102,6 +102,11 @@ export class MoveFileTool extends Tool {
     let preview: string;
 
     if (sourceStat.isDirectory()) {
+      if (!this.workspaceManager.getCapabilities().atomicDirectoryNoReplace) {
+        throw new SecurityError(
+          "Directory relocation disabled: atomic no-replace capability ('atomicDirectoryNoReplace' via renameat2/renamex_np) is unavailable on this platform/runtime"
+        );
+      }
       this.workspaceManager.assertNotDescendant(canonicalSource, canonicalDest);
       preview = `Move directory: ${relSource} -> ${relDest}`;
     } else if (sourceStat.isSymbolicLink()) {
@@ -112,6 +117,12 @@ export class MoveFileTool extends Tool {
       preview = `Move file: ${relSource} -> ${relDest} (${buf.length} bytes)${overwrite ? ' [overwrite: true]' : ''}`;
     } else {
       throw new SecurityError(`Unsupported file type: '${relSource}'`);
+    }
+
+    if (overwrite && !this.workspaceManager.getCapabilities().safeDestinationOverwrite) {
+      throw new SecurityError(
+        "Safe destination overwrite disabled: verified displacement/staging capability ('safeDestinationOverwrite') is unavailable"
+      );
     }
 
     // Check destination existence and capture fingerprint / identity
@@ -220,6 +231,20 @@ export class MoveFileTool extends Tool {
         originalContentHash = crypto.createHash('sha256').update(buf).digest('hex');
       }
 
+      if (sourceStat.isDirectory()) {
+        if (!this.workspaceManager.getCapabilities().atomicDirectoryNoReplace) {
+          throw new SecurityError(
+            "Directory relocation disabled: atomic no-replace capability ('atomicDirectoryNoReplace' via renameat2/renamex_np) is unavailable on this platform/runtime"
+          );
+        }
+      }
+
+      if (overwrite && !this.workspaceManager.getCapabilities().safeDestinationOverwrite) {
+        throw new SecurityError(
+          "Safe destination overwrite disabled: verified displacement/staging capability ('safeDestinationOverwrite') is unavailable"
+        );
+      }
+
       // Revalidate destination identity and content hash immediately before approval validation
       let destinationContentHash: string | undefined;
       let destinationIdentity: DestinationIdentity | undefined;
@@ -281,7 +306,8 @@ export class MoveFileTool extends Tool {
 
       const result = await this.workspaceManager.moveEntry(canonicalSource, canonicalDest, {
         overwrite,
-        expectedDestIdentity: destinationIdentity
+        expectedDestIdentity: destinationIdentity,
+        expectedDestContentHash: destinationContentHash
       });
 
       return {
