@@ -32,10 +32,10 @@ Cline is an autonomous coding agent that executes terminal commands, reads and w
    - **API Provider**: Select `OpenAI Compatible`.
    - **Base URL**: Enter `http://localhost:3000/v1` (or `http://127.0.0.1:3000/v1`).
    - **API Key**: Enter your `PROXY_API_KEY` (or any non-empty string like `sk-cline-local` in open development mode).
-   - **Model ID**: Enter a canonical model identifier:
-     - `gemini-flash` *(Recommended for fast, low-cost autonomous tool iteration)*
-     - `gemini-pro` *(Recommended for complex code architecture and debugging)*
-     - `gemini-thinking` *(Extended reasoning)*
+   - **Model ID**: Enter a canonical model identifier supporting tool calling:
+     - `gemini-flash` *(Recommended: fast, low-cost autonomous tool iteration)*
+     - `gemini-pro` *(Recommended: complex code architecture, multi-file planning, and tools)*
+     *(Note: `gemini-thinking` and `gemini-lite` do not support tool calling; requests with tools will fail with HTTP 400 `capability_not_supported`)*
 5. Optional Settings:
    - **Custom Instructions**:
      ```text

@@ -32,9 +32,9 @@ Roo Code extends autonomous agent workflows by providing distinct operational mo
      Enter your `PROXY_API_KEY` from `.env` (or a placeholder like `sk-roo-code-local` in development mode).
    - **Model ID**:
      Configure a canonical model ID based on the active mode:
-     - For **Code Mode**: `gemini-flash` (fastest iteration) or `gemini-pro`.
-     - For **Architect Mode**: `gemini-pro` or `gemini-thinking` (high reasoning capacity).
-     - For **Ask Mode**: `gemini-flash` or `gemini-lite`.
+     - For **Code Mode**: `gemini-flash` (fastest iteration) or `gemini-pro` (tools supported).
+     - For **Architect Mode**: `gemini-pro` (with tools) or `gemini-thinking` (text-only reasoning).
+     - For **Ask Mode**: `gemini-flash`, `gemini-lite`, or `gemini-thinking` (conversational Q&A).
 6. Save your settings.
 
 ---

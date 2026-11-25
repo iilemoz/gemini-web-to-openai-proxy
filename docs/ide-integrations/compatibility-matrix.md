@@ -64,10 +64,10 @@ The proxy exposes strictly genuine canonical model identifiers in `GET /v1/model
 
 | Public Model ID | Upstream Web Model | Streaming | Tool Calling | Reasoning Stream | Description & Recommended Use |
 |:---|:---|:---:|:---:|:---:|:---|
-| **`gemini-flash`** | `gemini-3-flash` | ✅ Yes | ✅ Yes | ❌ No | Default fast model. Ideal for everyday chat, refactoring, and Cline iterative coding. |
-| **`gemini-pro`** | `gemini-3-pro` | ✅ Yes | ✅ Yes | ❌ No | High-capacity model. Best for complex software architecture and multi-file planning. |
-| **`gemini-thinking`** | `gemini-3-thinking` | ✅ Yes | ✅ Yes | ✅ Yes | Extended chain-of-thought reasoning. Excellent for debugging complex algorithms. |
-| **`gemini-lite`** | `gemini-3-lite` | ✅ Yes | ✅ Yes | ❌ No | Ultra-low latency model for simple queries and quick explanations. |
+| **`gemini-flash`** | `gemini-3-flash` | ✅ Yes | ✅ Yes | ❌ No | Default fast model. Ideal for everyday chat, refactoring, and Cline/Roo Code iterative coding. |
+| **`gemini-pro`** | `gemini-3-pro` | ✅ Yes | ✅ Yes | ❌ No | High-capacity model. Best for complex software architecture, multi-file planning, and tools. |
+| **`gemini-thinking`** | `gemini-3-thinking` | ✅ Yes | ❌ No | ✅ Yes | Extended chain-of-thought reasoning (Text only). Requests with tools fail with HTTP 400. |
+| **`gemini-lite`** | `gemini-3-lite` | ✅ Yes | ❌ No | ❌ No | Ultra-low latency model for simple text queries. Requests with tools fail with HTTP 400. |
 
 > **Model Policy:**
 > - Foreign models (e.g. `gpt-4o`, `claude-3-5-sonnet`, `deepseek-chat`) and obsolete aliases (e.g. `gemini-2.5-flash`) fail closed with HTTP 404 (`model_not_found`).
