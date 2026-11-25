@@ -28,6 +28,15 @@ export const config = {
   // Provider & Model Identity Configuration
   enableLegacyProviderAliases: process.env.ENABLE_LEGACY_CROSS_PROVIDER_ALIASES === 'true',
 
+  // OpenAI Native Provider Configuration
+  openaiEnabled: process.env.OPENAI_ENABLED === 'true',
+  openaiApiKey: process.env.OPENAI_API_KEY || '',
+  openaiBaseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1',
+  openaiTimeoutMs: parseInt(process.env.OPENAI_TIMEOUT_MS || '60000', 10),
+  openaiMaxRetries: parseInt(process.env.OPENAI_MAX_RETRIES || '2', 10),
+  openaiOrganization: process.env.OPENAI_ORGANIZATION || '',
+  openaiProject: process.env.OPENAI_PROJECT || '',
+
   // Genuine Google Gemini model definitions
   models: [
     {

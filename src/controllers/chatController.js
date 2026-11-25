@@ -210,6 +210,8 @@ export async function handleChatCompletion(req, res) {
       let inDsmlMode        = false;
       let dsmlBuffer        = '';
       let pendingContent    = '';
+      let hasNativeToolCalls = false;
+      let upstreamUsage     = null;
 
       resetIdleTimer();
 
@@ -220,6 +222,20 @@ export async function handleChatCompletion(req, res) {
 
         const chunkType = typeof rawChunk === 'object' ? rawChunk.type : 'content';
         const chunkText = typeof rawChunk === 'object' ? rawChunk.text : rawChunk;
+
+        // ── Native tool calls from provider ─────────────────────────────────
+        if (chunkType === 'tool_calls') {
+          res.write(formatSSEChunk(completionId, model, { tool_calls: rawChunk.tool_calls }));
+          chunkCount++;
+          hasNativeToolCalls = true;
+          continue;
+        }
+
+        // ── Native usage from provider ──────────────────────────────────────
+        if (chunkType === 'usage') {
+          upstreamUsage = rawChunk.usage;
+          continue;
+        }
 
         if (!chunkText) continue;
 
@@ -233,8 +249,8 @@ export async function handleChatCompletion(req, res) {
 
         completionChars += chunkText.length;
 
-        // ── No tools → pass through directly (fastest path) ─────────────────
-        if (!hasTools) {
+        // ── No tools or non-Gemini provider → pass through directly (fastest path) ───
+        if (!hasTools || (provider.id !== 'gemini' && provider.name !== 'gemini')) {
           res.write(formatSSEChunk(completionId, model, { content: chunkText }));
           chunkCount++;
           continue;
@@ -284,7 +300,9 @@ export async function handleChatCompletion(req, res) {
       }
 
       // ── Emit parsed tool calls (or stop) ──────────────────────────────────
-      if (dsmlBuffer) {
+      if (hasNativeToolCalls) {
+        res.write(formatSSEChunk(completionId, model, {}, 'tool_calls'));
+      } else if (dsmlBuffer) {
         const { content: afterContent, toolCalls } = parseDSML(dsmlBuffer);
 
         if (afterContent) {
@@ -313,11 +331,18 @@ export async function handleChatCompletion(req, res) {
 
       // ── Optional trailing usage chunk ──────────────────────────────────────
       if (includeUsage) {
-        const completionTokens = estimateTokens(' '.repeat(completionChars));
-        res.write(formatSSEUsageChunk(completionId, model, {
-          promptTokens,
-          completionTokens
-        }));
+        if (upstreamUsage) {
+          res.write(formatSSEUsageChunk(completionId, model, {
+            promptTokens: upstreamUsage.prompt_tokens ?? promptTokens,
+            completionTokens: upstreamUsage.completion_tokens ?? estimateTokens(' '.repeat(completionChars))
+          }));
+        } else {
+          const completionTokens = estimateTokens(' '.repeat(completionChars));
+          res.write(formatSSEUsageChunk(completionId, model, {
+            promptTokens,
+            completionTokens
+          }));
+        }
       }
 
       res.write(formatSSEDone());
@@ -327,7 +352,7 @@ export async function handleChatCompletion(req, res) {
 
     // ── NON-STREAMING RESPONSE ───────────────────────────────────────────────
     } else {
-      const { content, reasoning_content, toolCalls } = await executeWithRetry(
+      const { content, reasoning_content, toolCalls, usage } = await executeWithRetry(
         async () => {
           const generator = provider.chatComplete({
             model,
@@ -341,6 +366,8 @@ export async function handleChatCompletion(req, res) {
 
           let fullContent   = '';
           let fullReasoning = '';
+          let nativeToolCalls = null;
+          let upstreamUsage = null;
 
           for await (const rawChunk of generator) {
             if (signal.aborted) {
@@ -354,25 +381,39 @@ export async function handleChatCompletion(req, res) {
 
             if (chunkType === 'thinking') {
               fullReasoning += chunkText;
+            } else if (chunkType === 'tool_calls') {
+              nativeToolCalls = rawChunk.tool_calls;
+            } else if (chunkType === 'usage') {
+              upstreamUsage = rawChunk.usage;
             } else {
-              fullContent += chunkText;
+              fullContent += (chunkText || '');
             }
           }
 
-          const parsed = parseDSML(fullContent);
+          let finalContent = fullContent;
+          let finalToolCalls = nativeToolCalls || [];
 
-          if (isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
-            logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
-            const err = new Error(`Upstream model error: ${parsed.content}`);
-            err.status = 502;
-            err.code = 'model_error';
-            throw err;
+          // Only parse Gemini DSML if native tool calls weren't explicitly supplied
+          if (!nativeToolCalls) {
+            const parsed = parseDSML(fullContent);
+            finalContent = parsed.content;
+            finalToolCalls = parsed.toolCalls;
+
+            const isGemini = provider.id === 'gemini' || provider.name === 'gemini';
+            if (isGemini && isUpstreamErrorText(parsed.content) && (!parsed.toolCalls || parsed.toolCalls.length === 0)) {
+              logger.warn(`[ChatController] Upstream Gemini returned internal error text: "${parsed.content}"`);
+              const err = new Error(`Upstream model error: ${parsed.content}`);
+              err.status = 502;
+              err.code = 'model_error';
+              throw err;
+            }
           }
 
           return {
-            content: parsed.content,
+            content: finalContent,
             reasoning_content: fullReasoning || null,
-            toolCalls: parsed.toolCalls
+            toolCalls: finalToolCalls,
+            usage: upstreamUsage
           };
         },
         {
@@ -388,7 +429,8 @@ export async function handleChatCompletion(req, res) {
         content,
         reasoning_content,
         tool_calls:        toolCalls,
-        promptTokens
+        promptTokens,
+        usage
       }));
 
       logger.success(

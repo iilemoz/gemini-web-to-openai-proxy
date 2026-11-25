@@ -124,7 +124,8 @@ export async function handleResponses(req, res) {
           content += text;
         }
 
-        if (isUpstreamErrorText(content)) {
+        const isGemini = provider.id === 'gemini' || provider.name === 'gemini';
+        if (isGemini && isUpstreamErrorText(content)) {
           logger.warn(`[Responses API] Upstream Gemini returned internal error text: "${content}"`);
           const err = new Error(`Upstream model error: ${content}`);
           err.status = 502;
