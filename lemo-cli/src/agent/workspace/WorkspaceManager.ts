@@ -78,10 +78,27 @@ export class WorkspaceManager {
     }
 
     const probed = PlatformCapabilityRegistry.probe(this.root);
-    this.capabilities = {
-      ...probed,
-      ...(options.capabilities ?? {})
+    // Custom capability overrides cannot turn an unsupported kernel operation into a supported one.
+    // If a capability requires native/platform support and the probe determined it is unavailable,
+    // custom overrides must not claim it is supported.
+    const requestedCapabilities = options.capabilities ?? {};
+    const effectiveCapabilities: FilesystemCapabilities = {
+      atomicDirectoryNoReplace: probed.atomicDirectoryNoReplace
+        ? (requestedCapabilities.atomicDirectoryNoReplace ?? true)
+        : (requestedCapabilities.atomicDirectoryNoReplace === true &&
+           typeof (globalThis as Record<string, unknown>)['__lemo_native_rename_noreplace'] === 'function'),
+      safeDestinationOverwrite: probed.safeDestinationOverwrite
+        ? (requestedCapabilities.safeDestinationOverwrite ?? true)
+        : false,
+      safeSourceEntryRemoval: probed.safeSourceEntryRemoval
+        ? (requestedCapabilities.safeSourceEntryRemoval ?? true)
+        : false,
+      secureFileRelocation: probed.secureFileRelocation
+        ? (requestedCapabilities.secureFileRelocation ?? true)
+        : false
     };
+
+    this.capabilities = effectiveCapabilities;
   }
 
   /**
@@ -599,6 +616,8 @@ export class WorkspaceManager {
 
   /**
    * Sweeps and removes stale temp files older than maxAgeMs recursively.
+   * Recognizes `.lemo_bkp_*` staging files and applies conservative recovery/preservation:
+   * never blindly deletes user backups based solely on filename or age.
    */
   public cleanStaleTempFiles(maxAgeMs = 3_600_000): void {
     const sweep = (dir: string) => {
@@ -611,14 +630,23 @@ export class WorkspaceManager {
             if (entry.name !== '.git' && entry.name !== 'node_modules') {
               sweep(full);
             }
-          } else if (entry.isFile() && entry.name.startsWith('.') && entry.name.includes('.lemo_tmp_')) {
-            try {
-              const stat = fs.statSync(full);
-              if (now - stat.mtimeMs > maxAgeMs) {
-                fs.unlinkSync(full);
+          } else if (entry.isFile()) {
+            if (entry.name.startsWith('.') && entry.name.includes('.lemo_tmp_')) {
+              try {
+                const stat = fs.statSync(full);
+                if (now - stat.mtimeMs > maxAgeMs) {
+                  fs.unlinkSync(full);
+                }
+              } catch {
+                // Ignore individual unlink error
               }
-            } catch {
-              // Ignore individual unlink error
+            } else if (entry.name.startsWith('.') && entry.name.includes('.lemo_bkp_')) {
+              // Ignore companion journal files during file scan; they are handled by recoverStaleBackupEntry
+              if (entry.name.endsWith('.journal.json')) {
+                continue;
+              }
+              // Staging backup entry: conservative crash recovery
+              this.recoverStaleBackupEntry(full);
             }
           }
         }
@@ -627,6 +655,116 @@ export class WorkspaceManager {
       }
     };
     sweep(this.root);
+  }
+
+  /**
+   * Conservative crash recovery for `.lemo_bkp_*` staging entries.
+   * Invariants:
+   * 1. Never blindly delete backup entries based only on filename or age.
+   * 2. Never automatically overwrite an existing destination during recovery.
+   * 3. Verify file type, workspace containment, and journal metadata.
+   * 4. If destination does not exist and unambiguous, restore the backup.
+   * 5. If destination exists, ambiguous, or tampered, preserve backup untouched for manual reconciliation.
+   */
+  public recoverStaleBackupEntry(backupPath: string): 'recovered' | 'preserved' | 'skipped' {
+    try {
+      if (!isPathInside(this.root, backupPath)) {
+        return 'skipped';
+      }
+
+      let backupStat: fs.Stats;
+      try {
+        backupStat = fs.lstatSync(backupPath);
+      } catch {
+        return 'skipped';
+      }
+
+      // Reject symlinks or non-regular files
+      if (backupStat.isSymbolicLink() || !backupStat.isFile()) {
+        return 'preserved';
+      }
+
+      const filename = path.basename(backupPath);
+      const dir = path.dirname(backupPath);
+
+      // Check for associated atomic journal file: <backupPath>.journal.json
+      const journalPath = `${backupPath}.journal.json`;
+      let targetCanonical: string | null = null;
+      let expectedHash: string | null = null;
+
+      if (fs.existsSync(journalPath)) {
+        try {
+          const rawJournal = fs.readFileSync(journalPath, 'utf8');
+          const journalData = JSON.parse(rawJournal);
+          if (
+            journalData &&
+            typeof journalData.targetCanonical === 'string' &&
+            isPathInside(this.root, journalData.targetCanonical)
+          ) {
+            targetCanonical = journalData.targetCanonical;
+            expectedHash = typeof journalData.expectedHash === 'string' ? journalData.expectedHash : null;
+          } else {
+            // Target is invalid, outside workspace root, or corrupted: preserve backup for manual inspection
+            return 'preserved';
+          }
+        } catch {
+          // Journal corrupted or invalid: preserve both for manual recovery
+          return 'preserved';
+        }
+      }
+
+      // If no journal, deduce target from pattern: .lemo_bkp_<basename>_<nonce>.tmp
+      if (!targetCanonical) {
+        const match = /^\.lemo_bkp_(.+)_([a-f0-9]+)\.tmp$/.exec(filename);
+        if (match && match[1]) {
+          const originalBasename = match[1];
+          targetCanonical = path.join(dir, originalBasename);
+        }
+      }
+
+      if (!targetCanonical || !isPathInside(this.root, targetCanonical)) {
+        return 'preserved';
+      }
+
+      // Check if destination exists
+      let destExists = false;
+      try {
+        fs.lstatSync(targetCanonical);
+        destExists = true;
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'ENOENT') {
+          return 'preserved';
+        }
+      }
+
+      // If destination already exists: NEVER overwrite. Preserve backup for manual reconciliation.
+      if (destExists) {
+        return 'preserved';
+      }
+
+      // If journal specified an expected hash, verify backup has not been tampered with
+      if (expectedHash) {
+        const buf = fs.readFileSync(backupPath);
+        const actualHash = crypto.createHash('sha256').update(buf).digest('hex');
+        if (actualHash !== expectedHash) {
+          // Backup was modified or tampered with: do NOT restore, preserve for manual recovery
+          return 'preserved';
+        }
+      }
+
+      // Recover backup back to canonical destination
+      fs.renameSync(backupPath, targetCanonical);
+
+      // Clean up journal if present
+      if (fs.existsSync(journalPath)) {
+        try { fs.unlinkSync(journalPath); } catch {}
+      }
+
+      return 'recovered';
+    } catch {
+      return 'preserved';
+    }
   }
 
   /**
@@ -832,15 +970,36 @@ export class WorkspaceManager {
 
         // Verified displacement and staging strategy:
         // Displace the approved destination to a temporary nonce location in the same directory.
-        // This eliminates TOCTOU races between identity check and overwrite rename.
+        // Also persist an atomic journal metadata file alongside for crash recovery.
         const destDir = path.dirname(canonicalDest);
         const nonce = crypto.randomBytes(8).toString('hex');
         const displacedPath = path.join(destDir, `.lemo_bkp_${path.basename(canonicalDest)}_${nonce}.tmp`);
+        const journalPath = `${displacedPath}.journal.json`;
         WorkspaceManager.activeGlobalTempFiles.add(displacedPath);
+
+        // Pre-create atomic journal before displacement
+        try {
+          fs.writeFileSync(
+            journalPath,
+            JSON.stringify({
+              targetCanonical: canonicalDest,
+              expectedHash: options?.expectedDestContentHash ?? null,
+              expectedDevice: options?.expectedDestIdentity?.deviceNumber ?? null,
+              expectedInode: options?.expectedDestIdentity?.inodeNumber ?? null,
+              timestamp: Date.now()
+            })
+          );
+        } catch {
+          // Non-fatal if journal write fails
+        }
+
+        let capturedDisplacedStat: fs.Stats | null = null;
+        let capturedDisplacedHash: string | null = null;
 
         try {
           await fs.promises.rename(canonicalDest, displacedPath);
         } catch (displaceErr: unknown) {
+          try { if (fs.existsSync(journalPath)) fs.unlinkSync(journalPath); } catch {}
           WorkspaceManager.activeGlobalTempFiles.delete(displacedPath);
           throw new SecurityError(
             `Failed to stage destination file for verified overwrite: ${displaceErr instanceof Error ? displaceErr.message : String(displaceErr)}`
@@ -849,11 +1008,32 @@ export class WorkspaceManager {
 
         let destinationVerified = false;
         try {
-          // Inspect displaced destination object
+          // Inspect displaced destination object and bind its displaced identity
           const displacedStat = await fs.promises.lstat(displacedPath);
           if (!displacedStat.isFile()) {
             throw new SecurityError('Displaced destination object is not a regular file');
           }
+          capturedDisplacedStat = displacedStat;
+
+          const displacedBuf = await fs.promises.readFile(displacedPath);
+          const actualHash = crypto.createHash('sha256').update(displacedBuf).digest('hex');
+          capturedDisplacedHash = actualHash;
+
+          // Update journal with exact displaced parameters
+          try {
+            fs.writeFileSync(
+              journalPath,
+              JSON.stringify({
+                targetCanonical: canonicalDest,
+                expectedHash: options?.expectedDestContentHash ?? actualHash,
+                displacedHash: actualHash,
+                expectedDevice: Number(displacedStat.dev),
+                expectedInode: Number(displacedStat.ino),
+                timestamp: Date.now()
+              })
+            );
+          } catch {}
+
           if (
             options?.expectedDestIdentity?.inodeNumber !== undefined &&
             Number(displacedStat.ino) !== options.expectedDestIdentity.inodeNumber
@@ -866,12 +1046,8 @@ export class WorkspaceManager {
           ) {
             throw new SecurityError('Destination file device changed prior to overwrite rename (displacement verification failed)');
           }
-          if (options?.expectedDestContentHash !== undefined) {
-            const displacedBuf = await fs.promises.readFile(displacedPath);
-            const actualHash = crypto.createHash('sha256').update(displacedBuf).digest('hex');
-            if (actualHash !== options.expectedDestContentHash) {
-              throw new SecurityError('Destination file content changed prior to overwrite displacement');
-            }
+          if (options?.expectedDestContentHash !== undefined && actualHash !== options.expectedDestContentHash) {
+            throw new SecurityError('Destination file content changed prior to overwrite displacement');
           }
 
           // Inspect source before committing rename
@@ -888,12 +1064,71 @@ export class WorkspaceManager {
           await fs.promises.rename(canonicalSource, canonicalDest);
           destinationVerified = true;
         } catch (stageErr: unknown) {
-          // Rollback displaced destination if destination wasn't successfully replaced
+          // Rollback displaced destination if destination wasn't successfully replaced.
+          // Verified Rollback (FINDING-01):
+          // 1. Verify displacedPath matches approved identity (file, inode/dev, hash).
+          // 2. Verify canonicalDest is in expected state (must NOT exist).
+          // 3. Never overwrite an unexpected destination occupant during rollback.
+          // 4. If identity or destination state cannot be verified, fail closed and preserve files.
           if (!destinationVerified) {
+            let rollbackSafe = false;
+            let rollbackErrorReason = '';
+
             try {
-              await fs.promises.rename(displacedPath, canonicalDest);
-            } catch {
-              // Rollback failed; preserve displaced path for manual recovery
+              // Re-check displaced path still exists and is a regular file
+              const checkDisplacedStat = await fs.promises.lstat(displacedPath);
+              if (!checkDisplacedStat.isFile()) {
+                rollbackErrorReason = `Displaced backup at '${this.toRelative(displacedPath)}' is not a regular file`;
+              } else if (
+                capturedDisplacedStat &&
+                (Number(checkDisplacedStat.ino) !== Number(capturedDisplacedStat.ino) ||
+                  Number(checkDisplacedStat.dev) !== Number(capturedDisplacedStat.dev))
+              ) {
+                rollbackErrorReason = `Displaced backup identity mismatch at '${this.toRelative(displacedPath)}'`;
+              } else {
+                const bkpBuf = await fs.promises.readFile(displacedPath);
+                const bkpHash = crypto.createHash('sha256').update(bkpBuf).digest('hex');
+                if (capturedDisplacedHash && bkpHash !== capturedDisplacedHash) {
+                  rollbackErrorReason = `Displaced backup content mismatch at '${this.toRelative(displacedPath)}'`;
+                } else {
+                  rollbackSafe = true;
+                }
+              }
+
+              // Check if canonicalDest was unexpectedly occupied
+              if (rollbackSafe) {
+                try {
+                  await fs.promises.lstat(canonicalDest);
+                  // Destination is occupied! Must not overwrite!
+                  rollbackSafe = false;
+                  rollbackErrorReason = `Destination path '${this.toRelative(canonicalDest)}' was unexpectedly occupied during rollback`;
+                } catch (destCheckErr: unknown) {
+                  const code = (destCheckErr as { code?: string })?.code;
+                  if (code !== 'ENOENT') {
+                    rollbackSafe = false;
+                    rollbackErrorReason = `Cannot verify destination path '${this.toRelative(canonicalDest)}' status: ${destCheckErr instanceof Error ? destCheckErr.message : String(destCheckErr)}`;
+                  }
+                }
+              }
+
+              if (rollbackSafe) {
+                await fs.promises.rename(displacedPath, canonicalDest);
+                if (fs.existsSync(journalPath)) {
+                  try { fs.unlinkSync(journalPath); } catch {}
+                }
+              } else {
+                // Fail closed: preserve both displaced backup and unexpected destination occupant
+                throw new SecurityError(
+                  `Verified rollback aborted to prevent data corruption (${rollbackErrorReason}). Displaced entry preserved at '${this.toRelative(displacedPath)}'; manual reconciliation required.`
+                );
+              }
+            } catch (rbErr: unknown) {
+              if (rbErr instanceof SecurityError) {
+                throw rbErr;
+              }
+              throw new SecurityError(
+                `Rollback failed: ${rbErr instanceof Error ? rbErr.message : String(rbErr)}. Displaced entry preserved at '${this.toRelative(displacedPath)}'; manual reconciliation required.`
+              );
             }
           }
           throw stageErr;
@@ -901,6 +1136,9 @@ export class WorkspaceManager {
           if (destinationVerified) {
             try {
               await fs.promises.unlink(displacedPath);
+              if (fs.existsSync(journalPath)) {
+                fs.unlinkSync(journalPath);
+              }
             } catch {
               // Nonce temp file will be cleaned up by sweep
             }

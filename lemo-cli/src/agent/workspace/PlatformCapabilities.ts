@@ -90,13 +90,10 @@ export class PlatformCapabilityRegistry {
       }
 
       // 2. Probe atomicDirectoryNoReplace:
-      // Check for explicit native bindings first
-      const hasNativeBinding = Boolean(
-        (globalThis as Record<string, unknown>)['__lemo_native_rename_noreplace'] ||
-        process.env['LEMO_FORCE_NATIVE_RENAME_NOREPLACE'] === '1'
-      );
-
-      if (hasNativeBinding) {
+      // Capabilities that represent native filesystem guarantees require an actual callable native implementation.
+      // Environment variables or flags (e.g. LEMO_FORCE_NATIVE_RENAME_NOREPLACE) must never claim an unavailable native primitive exists.
+      const nativeBinding = (globalThis as Record<string, unknown>)['__lemo_native_rename_noreplace'];
+      if (typeof nativeBinding === 'function') {
         atomicDirectoryNoReplace = true;
       } else if (process.platform === 'win32') {
         // On Windows (NTFS), libuv MoveFileExW without replace flag rejects directory rename
@@ -120,21 +117,9 @@ export class PlatformCapabilityRegistry {
         }
       } else {
         // POSIX (Linux, macOS, BSD): standard rename(2) silently overwrites empty directories.
-        // Without native renameat2(RENAME_NOREPLACE) or renamex_np(RENAME_EXCL), this capability is FALSE.
-        const d1 = path.join(probeDir, 'probe_d1');
-        const d2 = path.join(probeDir, 'probe_d2');
-        fs.mkdirSync(d1);
-        fs.mkdirSync(d2);
-        try {
-          fs.renameSync(d1, d2);
-          // Successfully overwritten empty directory -> atomicDirectoryNoReplace is FALSE
-          atomicDirectoryNoReplace = false;
-        } catch {
-          atomicDirectoryNoReplace = false;
-        } finally {
-          try { fs.rmSync(d1, { recursive: true, force: true }); } catch {}
-          try { fs.rmSync(d2, { recursive: true, force: true }); } catch {}
-        }
+        // Without a genuine callable native binding (renameat2 RENAME_NOREPLACE or renamex_np RENAME_EXCL),
+        // this capability is strictly FALSE.
+        atomicDirectoryNoReplace = false;
       }
     } catch {
       // Fail closed on any probing error
